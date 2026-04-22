@@ -1,0 +1,227 @@
+# %%
+# Import libraries
+import time
+import sys
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+#%%
+print('[START] mainMetaheuristics running', flush=True)
+
+# Define configuration parameters
+
+MaxFuncEvals = 15000
+MaxIter = 100
+trials= 10
+IterPrint=10
+InitPopSize= 100
+mPopSize = 50
+fPopSize = 50
+
+# %% Measuring Time - Start
+start_time_script = time.time()
+
+# %%
+# Load file
+from dataPreparation import load_data_rmfs
+path_U = "D:/ITB/Thesis/scratch_ma/association_matrix_normalized.csv"
+path_S = "D:/ITB/Thesis/scratch_ma/same_cluster_matrix.csv"
+path_min_inv = "D:/ITB/Thesis/scratch_ma/minimum_inventory.csv"
+path_max_cap = "D:/ITB/Thesis/scratch_ma/max_comp_number.csv"
+
+G_scalar = 40
+print('Reading data files', flush=True)
+U, S, sku_codes, G, g, p, lam, M = load_data_rmfs(
+    path_U, path_S, path_min_inv, G_scalar, path_max_cap
+)
+PN = len(sku_codes)
+Dimensions = [PN, M]
+print(f'[LOAD] Done. PN={PN}, M={M}, sum(g)={np.sum(g)}, sum(G)={np.sum(G)}', flush=True)
+
+# %%
+
+# Build problem
+from objective import RMFSproblem
+PN = len(sku_codes)
+problem = RMFSproblem(Dimensions, U, S, G, g, p, lam)
+problem['InitPopSize'] = InitPopSize
+print(f"[CONF] MaxFuncEvals={MaxFuncEvals}, MaxIter={MaxIter}, trials={trials}, InitPopSize={InitPopSize}", flush=True)
+
+# %%
+# Stop Criterion
+problem['StopCriterion'] = "Iterations"
+
+# %%
+# Optimizer
+from initializer import initialization
+print('Building initial population', flush=True)
+initialpop = initialization(problem)
+print('Initial population ready.', flush=True)
+del initialization
+
+if "ProblemPosition" in problem['ProblemStructure']:
+    CompMethod= np.empty((0, 5), dtype=object)
+else:
+    CompMethod= np.empty((0, 4), dtype=object)
+    
+# %% 
+# Run MA optimizer
+from ma import MA
+method = ['MA']
+for trial_idx in range (trials):
+    time_start_trial = time.time()
+    print(f'Trial {trial_idx+1}/{trials} started', flush=True)
+    
+    # Live figure setup
+    plt.ion()
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+    fig.show()
+    plt.show(block = False)
+    
+    x_line_live = []
+    y_line_live = []
+    
+    (line_line, ) = ax1.plot([], [], lw = 2, marker = 'o', markersize = 2)
+    ax1.set_xlabel("Iteration")
+    ax1.set_ylabel("Best objective")
+    ax1.set_title(f"Objective history - Trial {trial_idx+1}")
+    ax1.grid(alpha=0.3)
+    
+    # Live line plot cost over iteration
+    def on_iter_cb(it, gbest):        
+        if it % 10 != 0:
+            return
+
+        cost_val = float(gbest["cost"])
+        x_line_live.append(it)
+        y_line_live.append(cost_val)
+
+        line_line.set_data(x_line_live, y_line_live)
+        ax1.relim()
+        ax1.autoscale_view()
+        fig.canvas.draw()
+        fig.canvas.flush_events()
+        plt.pause(0.001)
+    
+    # Live scatter plot of mayfly positions (2D projection)
+    sc = ax2.scatter([], [])
+    ax2.set_xlim(0, 1)
+    ax2.set_ylim(0, 1)
+    ax2.set_xlabel("Position dim 1")
+    ax2.set_ylabel("Position dim 2")
+    ax2.set_title(f"Mayfly positions - Trial {trial_idx+1}")
+    ax2.grid(alpha=0.3)
+    
+    plt.draw()    
+    def on_position_cb(it, coords):
+        if it % 1 != 0:
+            return
+
+        sc.set_offsets(coords)
+        ax2.relim()
+        ax2.autoscale_view()
+        fig.canvas.draw()
+        fig.canvas.flush_events()
+        plt.pause(0.001)
+        
+    results = MA(problem,IterPrint, MaxIter, MaxFuncEvals,trial_idx,initialpop, mPopSize, fPopSize, a1=1.0,a2=1.5, a3=1.5,beta=2,dance=5,fl=1,dance_damp=0.99,fl_damp=0.99,nc=20,gmax=0.8,gmin=0.4,gamma=0.4, on_iter=on_iter_cb, on_position = on_position_cb)
+    
+    os.makedirs('results4', exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(f"results4/objective_history_trial_{trial_idx+1}.png", dpi=200)
+    plt.close(fig)
+    
+    CompMethod = np.vstack((CompMethod, results))
+
+    best = problem.get('LastBest')
+    if best is not None:
+        x_path = f"results4/X_trial_{trial_idx+1}.csv"
+        y_path = f"results4/Y_trial_{trial_idx+1}.csv"
+        z_path = f"results4/Z_trial_{trial_idx+1}.csv"
+        npz_path = f"results4/best_trial_{trial_idx+1}.npz"
+        csv_path = f"results4/best_trial_{trial_idx+1}.csv"
+        
+        Q = np.asarray(best['quantity_num'])
+        p_arr = np.asarray(problem['p'], dtype=np.int32)
+        sku_arr = np.asarray(sku_codes, dtype=object)
+
+        records = []
+
+        for m in range(M):
+            next_slot = 1
+
+            for i in range(PN):
+                qty_total = int(Q[i, m])
+                if qty_total <= 0:
+                    continue
+
+                full_slots = qty_total // p_arr[i]
+                remainder = qty_total % p_arr[i]
+
+                for _ in range(full_slots):
+                    records.append({
+                        'pod': m + 1,
+                        'slot': next_slot,
+                        'item': sku_arr[i],
+                        'quantity_in_that_slot': int(p_arr[i])
+                    })
+                    next_slot += 1
+
+                if remainder > 0:
+                    records.append({
+                        'pod': m + 1,
+                        'slot': next_slot,
+                        'item': sku_arr[i],
+                        'quantity_in_that_slot': int(remainder)
+                    })
+                    next_slot += 1
+
+        z_table = pd.DataFrame(records)
+        z_table.to_csv(z_path, index=False)
+
+        pd.DataFrame(best['position']).to_csv(x_path, index=False)
+        pd.DataFrame(best['compartment_num']).to_csv(y_path, index=False)
+        np.savez(npz_path, X=best['position'], Y=best['compartment_num'], PN=PN, M=M, best_cost=best['cost'])
+        pd.DataFrame({
+            'best_cost': [best['cost']],
+            'PN': [PN],
+            'M': [M],
+        }).to_csv(csv_path, index=False)
+
+        print(f"X saved to {x_path}", flush=True)
+        print(f"Y saved to {y_path}", flush=True)
+        print(f"Z saved to {z_path}", flush=True)
+        print(f"Summary saved to {csv_path}", flush=True)
+        print(f"Combined X/Y/PN/M saved to {npz_path}", flush=True)
+
+        conv = np.asarray(results[3], dtype=float)
+
+        history_df = pd.DataFrame({
+            "iteration": np.arange(len(conv)),
+            "best_objective": conv
+        })
+
+        history_df.to_csv(f"results4/objective_history_trial_{trial_idx+1}.csv", index=False)
+
+    time_end_trial = time.time()
+    elapsed_time_trial = time_end_trial - time_start_trial
+    print(f"[RUN] Trial {trial_idx+1}/{trials} finished. Best Cost={results[2]}, Elapsed Time={elapsed_time_trial:.2f} seconds", flush=True)
+
+plt.ioff()
+
+# %%
+## Save data
+df = pd.DataFrame(CompMethod)
+
+# Save the DataFrame to an Excel file
+df.to_excel('results4/ResultsCompMethod.xlsx', index=False)
+print('[SAVE] Results saved to results4/ResultsCompMethod.xlsx', flush=True)
+#del item, i, df, results, MaxIter, MaxFuncEvals, Dimensions, IterPrint, trials, method, user_input   
+
+# %% Measure Time - End
+end_time_script = time.time()
+elapsed_time_script = end_time_script - start_time_script
+print(f'[END] mainMetaheuristics finished. Total elapsed time: {elapsed_time_script:.2f} seconds', flush=True)     
