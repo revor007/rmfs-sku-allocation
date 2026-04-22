@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pathlib import Path
 
 #%%
 print('[START] mainMetaheuristics running', flush=True)
@@ -27,10 +28,12 @@ start_time_script = time.time()
 # %%
 # Load file
 from dataPreparation import load_data_rmfs
-path_U = "D:/ITB/Thesis/scratch_ma/association_matrix_normalized.csv"
-path_S = "D:/ITB/Thesis/scratch_ma/same_cluster_matrix.csv"
-path_min_inv = "D:/ITB/Thesis/scratch_ma/minimum_inventory.csv"
-path_max_cap = "D:/ITB/Thesis/scratch_ma/max_comp_number.csv"
+
+base_dir = Path(__file__).resolve().parent
+path_U = base_dir / "association_matrix_normalized.csv"
+path_S = base_dir / "same_cluster_matrix.csv"
+path_min_inv = base_dir / "minimum_inventory.csv"
+path_max_cap = base_dir / "max_comp_number.csv"
 
 G_scalar = 40
 print('Reading data files', flush=True)
