@@ -129,20 +129,20 @@ for trial_idx in range (trials):
         
     results = MA(problem,IterPrint, MaxIter, MaxFuncEvals,trial_idx,initialpop, mPopSize, fPopSize, a1=1.0,a2=1.5, a3=1.5,beta=2,dance=5,fl=1,dance_damp=0.99,fl_damp=0.99,nc=20,gmax=0.8,gmin=0.4,gamma=0.4, on_iter=on_iter_cb, on_position = on_position_cb)
     
-    os.makedirs('results4', exist_ok=True)
+    os.makedirs('results_fcgma', exist_ok=True)
     fig.tight_layout()
-    fig.savefig(f"results4/objective_history_trial_{trial_idx+1}.png", dpi=200)
+    fig.savefig(f"results_fcgma/objective_history_trial_{trial_idx+1}.png", dpi=200)
     plt.close(fig)
     
     CompMethod = np.vstack((CompMethod, results))
 
     best = problem.get('LastBest')
     if best is not None:
-        x_path = f"results4/X_trial_{trial_idx+1}.csv"
-        y_path = f"results4/Y_trial_{trial_idx+1}.csv"
-        z_path = f"results4/Z_trial_{trial_idx+1}.csv"
-        npz_path = f"results4/best_trial_{trial_idx+1}.npz"
-        csv_path = f"results4/best_trial_{trial_idx+1}.csv"
+        x_path = f"results_fcgma/X_trial_{trial_idx+1}.csv"
+        y_path = f"results_fcgma/Y_trial_{trial_idx+1}.csv"
+        z_path = f"results_fcgma/Z_trial_{trial_idx+1}.csv"
+        npz_path = f"results_fcgma/best_trial_{trial_idx+1}.npz"
+        csv_path = f"results_fcgma/best_trial_{trial_idx+1}.csv"
         
         Q = np.asarray(best['quantity_num'])
         p_arr = np.asarray(problem['p'], dtype=np.int32)
@@ -204,7 +204,7 @@ for trial_idx in range (trials):
             "best_objective": conv
         })
 
-        history_df.to_csv(f"results4/objective_history_trial_{trial_idx+1}.csv", index=False)
+        history_df.to_csv(f"results_fcgma/objective_history_trial_{trial_idx+1}.csv", index=False)
 
     time_end_trial = time.time()
     elapsed_time_trial = time_end_trial - time_start_trial
@@ -217,8 +217,8 @@ plt.ioff()
 df = pd.DataFrame(CompMethod)
 
 # Save the DataFrame to an Excel file
-df.to_excel('results4/ResultsCompMethod.xlsx', index=False)
-print('[SAVE] Results saved to results4/ResultsCompMethod.xlsx', flush=True)
+df.to_excel('results_fcgma/ResultsCompMethod.xlsx', index=False)
+print('[SAVE] Results saved to results_fcgma/ResultsCompMethod.xlsx', flush=True)
 #del item, i, df, results, MaxIter, MaxFuncEvals, Dimensions, IterPrint, trials, method, user_input   
 
 # %% Measure Time - End
