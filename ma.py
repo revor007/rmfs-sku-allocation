@@ -45,6 +45,7 @@ def MA(problem, IterPrint, MaxIter, MaxFuncEvals, curtrial, initialpop, mPopSize
 
     nVar = problem['nVar']
     shape = (nVar[0], nVar[1])
+    NP = int(mPopSize + fPopSize)
 
     # Gravity coefficient
     g = float(gmax)
@@ -217,15 +218,37 @@ def MA(problem, IterPrint, MaxIter, MaxFuncEvals, curtrial, initialpop, mPopSize
             female_child_base['velocity'] = np.zeros(shape, dtype=np.float32)
             male_child_base['best_position'] = male_child_base['position'].copy()
 
-            # Define the factor that divides the early and late stages of the algorithm, which controls the exploration and exploitation balance
-            progress = it / max(1, MaxIter)
-            o = np.exp(-((1 - progress) ** (1 / np.e)))
+            # Define o using current iteration t and total iterations NG.
+            if MaxIter > 0:
+                t = float(min(it + 1, MaxIter))
+                NG = float(MaxIter)
+                o = np.exp(-((1.0 - (t / NG)) ** (1.0 / np.e)))
+            else:
+                o = 1.0
+
+            # Rate-based sparse variation: rr in (0,1), nvariation = NP * rr.
+            eps_rr = np.finfo(np.float32).eps
+            rr = float(np.clip(np.random.rand(), eps_rr, 1.0 - eps_rr))
+            nvariation = int(NP * rr)
             
             # If o < 1/2 (early stage), use Cauchy noise for more exploration; else (late stage), use Gaussian noise for more exploitation
             if o < (1/2):
-                child_m, child_f = ContinuousCrossoverCauchy(male_child_base['position'], female_child_base['position'])
+                child_m, child_f = ContinuousCrossoverCauchy(
+                    male_child_base['position'],
+                    female_child_base['position'],
+                    rr=rr,
+                    nvariation=nvariation,
+                    NP=NP,
+                )
             else:
-                child_m, child_f = ContinuousCrossoverGaussian(male_child_base['position'], female_child_base['position'], sigma=0.1)
+                child_m, child_f = ContinuousCrossoverGaussian(
+                    male_child_base['position'],
+                    female_child_base['position'],
+                    sigma=0.1,
+                    rr=rr,
+                    nvariation=nvariation,
+                    NP=NP,
+                )
 
             male_child_adapt['position'] = np.asarray(child_m, dtype=np.float32)
             female_child_adapt['position'] = np.asarray(child_f, dtype=np.float32)
