@@ -117,12 +117,13 @@ def repair_solution(pop, problem):
             if max_qty <= 0:
                 continue
 
-            qty = min(demand, max_qty)
-            if qty <= 0:
+            requested_qty = min(demand, max_qty)
+            if requested_qty <= 0:
                 continue
 
             old_slots = Y[i, m]
-            Q[i, m] += qty
+            prev_qty = int(Q[i, m])
+            Q[i, m] += requested_qty
             new_slots = int(np.ceil(Q[i, m] / p[i]))
             extra_slots = new_slots - old_slots
 
@@ -131,11 +132,13 @@ def repair_solution(pop, problem):
                 extra_slots = int(remaining_slots[m])
                 new_slots = old_slots + extra_slots
                 Q[i, m] = min(Q[i, m], new_slots * int(p[i]))
-                qty = Q[i, m] - np.sum(Q[i, :]) + Q[i, m]
+
+            # Decrease remaining demand by the quantity actually allocated in this pod.
+            actual_qty = int(max(0, Q[i, m] - prev_qty))
 
             Y[i, m] = new_slots
             remaining_slots[m] -= extra_slots
-            demand -= qty
+            demand -= actual_qty
 
         if demand > 0:
             feasible = False
