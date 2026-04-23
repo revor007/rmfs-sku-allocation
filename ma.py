@@ -231,8 +231,8 @@ def MA(problem, IterPrint, MaxIter, MaxFuncEvals, curtrial, initialpop, mPopSize
             rr = float(np.clip(np.random.rand(), eps_rr, 1.0 - eps_rr))
             nvariation = int(NP * rr)
             
-            # If o < 1/2 (early stage), use Cauchy noise for more exploration; else (late stage), use Gaussian noise for more exploitation
-            if o < (1/2):
+            # If o < 0.6 (early stage), use Cauchy noise for more exploration; else (late stage), use Gaussian noise for more exploitation
+            if o < (0.6):
                 child_m, child_f = ContinuousCrossoverCauchy(
                     male_child_base['position'],
                     female_child_base['position'],
