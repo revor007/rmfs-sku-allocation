@@ -268,9 +268,8 @@ def build_default_stage_meta(g, p, G):
     }
 
 
-def RMFSproblem(Dimensions, U, S, G, g, p, lam, stage_meta=None):
+def RMFSproblem(Dimensions, U, G, g, p, lam, stage_meta=None):
     U = np.asarray(U, dtype=np.float32)
-    S = np.asarray(S, dtype=np.float32)
     G = np.asarray(G, dtype=np.int32)
     g = np.asarray(g, dtype=np.int32)
     p = np.asarray(p, dtype=np.int32)
@@ -310,7 +309,6 @@ def RMFSproblem(Dimensions, U, S, G, g, p, lam, stage_meta=None):
         "RepairFunction": repair_solution,
         "nVar": Dimensions,
         "U": U,
-        "S": S,
         "G": G,
         "g": g,
         "p": p,
