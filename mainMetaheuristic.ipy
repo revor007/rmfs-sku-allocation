@@ -12,15 +12,31 @@ from pathlib import Path
 #%%
 print('[START] mainMetaheuristics running', flush=True)
 
+# Environment override helpers
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    return int(raw)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
 # Define configuration parameters
 
-MaxFuncEvals = 15000
-MaxIter = 100
-trials= 10
-IterPrint=10
-InitPopSize= 100
-mPopSize = 50
-fPopSize = 50
+MaxFuncEvals = _env_int("FCGMA_MAX_FUNC_EVALS", 15000)
+MaxIter = _env_int("FCGMA_MAX_ITER", 100)
+trials = _env_int("FCGMA_TRIALS", 1)
+IterPrint = _env_int("FCGMA_ITER_PRINT", 10)
+InitPopSize = _env_int("FCGMA_INIT_POP", 100)
+mPopSize = _env_int("FCGMA_M_POP", 50)
+fPopSize = _env_int("FCGMA_F_POP", 50)
+EnablePlots = _env_bool("FCGMA_ENABLE_PLOTS", False)
 
 # %% Measuring Time - Start
 start_time_script = time.time()
@@ -30,26 +46,28 @@ start_time_script = time.time()
 from dataPreparation import load_data_rmfs
 
 base_dir = Path(__file__).resolve().parent
-path_U = base_dir / "association_matrix_normalized.csv"
+path_U = base_dir / "jaccard_similarity_matrix.csv"
 path_S = base_dir / "same_cluster_matrix.csv"
 path_min_inv = base_dir / "minimum_inventory.csv"
 path_max_cap = base_dir / "max_comp_number.csv"
+path_stage1 = base_dir / "Clustering" / "bc-k-means-results.csv"
 
 G_scalar = 40
 print('Reading data files', flush=True)
-U, S, sku_codes, G, g, p, lam, M = load_data_rmfs(
-    path_U, path_S, path_min_inv, G_scalar, path_max_cap
+U, S, sku_codes, G, g, p, lam, M, stage_meta = load_data_rmfs(
+    path_U, path_S, path_min_inv, G_scalar, path_max_cap, path_stage1=path_stage1
 )
 PN = len(sku_codes)
 Dimensions = [PN, M]
 print(f'[LOAD] Done. PN={PN}, M={M}, sum(g)={np.sum(g)}, sum(G)={np.sum(G)}', flush=True)
+print(f"[STAGE] {stage_meta.get('summary', {})}", flush=True)
 
 # %%
 
 # Build problem
 from objective import RMFSproblem
 PN = len(sku_codes)
-problem = RMFSproblem(Dimensions, U, S, G, g, p, lam)
+problem = RMFSproblem(Dimensions, U, S, G, g, p, lam, stage_meta=stage_meta)
 problem['InitPopSize'] = InitPopSize
 print(f"[CONF] MaxFuncEvals={MaxFuncEvals}, MaxIter={MaxIter}, trials={trials}, InitPopSize={InitPopSize}", flush=True)
 
@@ -79,10 +97,14 @@ for trial_idx in range (trials):
     print(f'Trial {trial_idx+1}/{trials} started', flush=True)
     
     # Live figure setup
-    plt.ion()
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-    fig.show()
-    plt.show(block = False)
+    if EnablePlots:
+        plt.ion()
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        fig.show()
+        plt.show(block = False)
+    else:
+        plt.ioff()
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
     
     x_line_live = []
     y_line_live = []
@@ -95,7 +117,7 @@ for trial_idx in range (trials):
     
     # Live line plot cost over iteration
     def on_iter_cb(it, gbest):        
-        if it % 10 != 0:
+        if (not EnablePlots) or it % 10 != 0:
             return
 
         cost_val = float(gbest["cost"])
@@ -120,7 +142,7 @@ for trial_idx in range (trials):
     
     plt.draw()    
     def on_position_cb(it, coords):
-        if it % 1 != 0:
+        if (not EnablePlots) or it % 1 != 0:
             return
 
         sc.set_offsets(coords)
@@ -132,20 +154,21 @@ for trial_idx in range (trials):
         
     results = MA(problem,IterPrint, MaxIter, MaxFuncEvals,trial_idx,initialpop, mPopSize, fPopSize, a1=1.0,a2=1.5, a3=1.5,beta=2,dance=5,fl=1,dance_damp=0.99,fl_damp=0.99,nc=20,gmax=0.8,gmin=0.4,gamma=0.4, on_iter=on_iter_cb, on_position = on_position_cb)
     
-    os.makedirs('results_fcgma', exist_ok=True)
+    results_dir = base_dir / 'results_fcgma'
+    os.makedirs(results_dir, exist_ok=True)
     fig.tight_layout()
-    fig.savefig(f"results_fcgma/objective_history_trial_{trial_idx+1}.png", dpi=200)
+    fig.savefig(results_dir / f"objective_history_trial_{trial_idx+1}.png", dpi=200)
     plt.close(fig)
     
     CompMethod = np.vstack((CompMethod, results))
 
     best = problem.get('LastBest')
     if best is not None:
-        x_path = f"results_fcgma/X_trial_{trial_idx+1}.csv"
-        y_path = f"results_fcgma/Y_trial_{trial_idx+1}.csv"
-        z_path = f"results_fcgma/Z_trial_{trial_idx+1}.csv"
-        npz_path = f"results_fcgma/best_trial_{trial_idx+1}.npz"
-        csv_path = f"results_fcgma/best_trial_{trial_idx+1}.csv"
+        x_path = results_dir / f"X_trial_{trial_idx+1}.csv"
+        y_path = results_dir / f"Y_trial_{trial_idx+1}.csv"
+        z_path = results_dir / f"Z_trial_{trial_idx+1}.csv"
+        npz_path = results_dir / f"best_trial_{trial_idx+1}.npz"
+        csv_path = results_dir / f"best_trial_{trial_idx+1}.csv"
         
         Q = np.asarray(best['quantity_num'])
         p_arr = np.asarray(problem['p'], dtype=np.int32)
@@ -207,7 +230,7 @@ for trial_idx in range (trials):
             "best_objective": conv
         })
 
-        history_df.to_csv(f"results_fcgma/objective_history_trial_{trial_idx+1}.csv", index=False)
+        history_df.to_csv(results_dir / f"objective_history_trial_{trial_idx+1}.csv", index=False)
 
     time_end_trial = time.time()
     elapsed_time_trial = time_end_trial - time_start_trial

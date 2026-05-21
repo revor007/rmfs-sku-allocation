@@ -1,55 +1,104 @@
-# %%
-# Import libraries
 import numpy as np
 from scipy import sparse as sp
 
 NEG_INF = -1e30
 
 
-# %%
-# Define objective function and constraint for RMFS
+def validate_solution(X, Q, Y, problem):
+    X = np.asarray(X, dtype=np.uint8)
+    Q = np.asarray(Q, dtype=np.int32)
+    Y = np.asarray(Y, dtype=np.int32)
+    G = np.asarray(problem["G"], dtype=np.int32)
+    p = np.asarray(problem["p"], dtype=np.int32)
+
+    if np.any(Y.sum(axis=0) > G):
+        return False
+    if np.any(Y < 0) or np.any(Q < 0):
+        return False
+    if np.any(Y < X):
+        return False
+    if np.any(Q > p[:, None] * Y):
+        return False
+
+    stage_required_slots = np.asarray(problem["stage_required_slots"], dtype=np.int32)
+    random_new_indices = np.asarray(problem["random_new_indices"], dtype=np.int32)
+    if random_new_indices.size > 0:
+        if np.any(Y[random_new_indices].sum(axis=1) < stage_required_slots[random_new_indices]):
+            return False
+        if np.any(X[random_new_indices].sum(axis=1) > stage_required_slots[random_new_indices]):
+            return False
+
+        for idx in random_new_indices:
+            allocation = problem["fixed_random_allocation"].get(int(idx))
+            if allocation is None:
+                return False
+
+            actual_pods = np.flatnonzero(Y[int(idx)])
+            expected_pods = np.sort(allocation["pods"])
+            if actual_pods.size != expected_pods.size:
+                return False
+            if not np.array_equal(actual_pods, expected_pods):
+                return False
+            if not np.array_equal(Y[int(idx), expected_pods], allocation["slots"]):
+                return False
+
+    stage2_required_indices = np.asarray(problem["stage2_required_indices"], dtype=np.int32)
+    if stage2_required_indices.size > 0:
+        if np.any(Y[stage2_required_indices].sum(axis=1) < stage_required_slots[stage2_required_indices]):
+            return False
+        if np.any(
+            Q[stage2_required_indices].sum(axis=1)
+            < np.asarray(problem["effective_g"], dtype=np.int32)[stage2_required_indices]
+        ):
+            return False
+
+    for leader_idx in np.asarray(problem["common_group_leaders"], dtype=np.int32):
+        members = problem["common_group_members"][int(leader_idx)]
+        leader_x = X[int(leader_idx)]
+        leader_y = Y[int(leader_idx)]
+        for follower_idx in members[1:]:
+            if not np.array_equal(X[int(follower_idx)], leader_x):
+                return False
+            if not np.array_equal(Y[int(follower_idx)], leader_y):
+                return False
+
+    return True
+
+
 def RMFSobjective(pop, problem):
-    # Evaluate objective on decoded binary support when available.
-    # This keeps MA movement continuous while feasibility/cost stay discrete.
-    X_eval = pop.get('position_bin', None)
+    X_eval = pop.get("position_bin", None)
     if X_eval is None:
-        X_eval = np.round(np.asarray(pop['position'], dtype=np.float32))
+        X_eval = np.round(np.asarray(pop["position"], dtype=np.float32))
+
     X = np.clip(np.asarray(X_eval), 0, 1).astype(np.uint8)
-    Q = np.asarray(pop['quantity_num'], dtype=np.int32)
-    Y = np.asarray(pop['compartment_num'], dtype=np.int32)
-    G = np.asarray(problem['G'], dtype=np.int32)
-    g = np.asarray(problem['g'], dtype=np.int32)
-    p = np.asarray(problem['p'], dtype=np.int32)
+    Q = np.asarray(pop["quantity_num"], dtype=np.int32)
+    Y = np.asarray(pop["compartment_num"], dtype=np.int32)
 
-    feasible = (
-        pop.get('is_feasible', True)
-        and np.all(Y.sum(axis=0) <= G)
-        and np.all(Q.sum(axis=1) >= g)
-        and np.all(Q <= p[:, None] * Y)
-        and np.all(Y >= X)
-        and np.all(Q >= 0)
-        and np.all(Y >= 0)
-    )
+    feasible = bool(pop.get("is_feasible", True))
+    if problem.get("ValidateFeasibility", True) and feasible:
+        feasible = validate_solution(X, Q, Y, problem)
 
-    if problem.get('ValidateFeasibility', True) and not feasible:
-        pop['cost'] = NEG_INF
+    if not feasible:
+        pop["is_feasible"] = False
+        pop["cost"] = NEG_INF
         return pop
 
-    # Sparse evaluation
-    X_csr = sp.csr_matrix(X, dtype=np.float32)
-    WX = problem['W_sparse'].dot(X_csr)
+    historical_indices = np.asarray(problem["historical_indices"], dtype=np.int32)
+    if historical_indices.size == 0:
+        pop["is_feasible"] = True
+        pop["cost"] = 0.0
+        return pop
 
-    objective = 0.5 * X_csr.multiply(WX).sum()
-    pop['cost'] = float(objective)
+    X_hist = sp.csr_matrix(X[historical_indices], dtype=np.float32)
+    WX = problem["W_stage2_sparse"].dot(X_hist)
+    objective = 0.5 * X_hist.multiply(WX).sum()
+
+    pop["is_feasible"] = True
+    pop["cost"] = float(objective)
     return pop
 
 
-# %%
 def decode_slot(Y, G):
-    """
-    Z[i, m, s] = 1 if slot s in pod m is occupied by SKU i.
-    This is reporting-only and should be used after optimization ends.
-    """
     Y = np.asarray(Y, dtype=np.int32)
     G = np.asarray(G, dtype=np.int32)
 
@@ -69,134 +118,230 @@ def decode_slot(Y, G):
     return Z
 
 
-# %%
+def seed_random_allocation(problem, Q, Y):
+    for idx, allocation in problem["fixed_random_allocation"].items():
+        pods = allocation["pods"]
+        if pods.size == 0:
+            continue
+        Y[int(idx), pods] = allocation["slots"]
+        Q[int(idx), pods] = allocation["quantity"]
+
+
+def build_pod_order(row_binary, remaining_slots, required_capacity_per_pod):
+    selected = np.flatnonzero(row_binary > 0)
+    if selected.size > 0:
+        if required_capacity_per_pod == 1:
+            selected_capacity = remaining_slots[selected]
+        else:
+            selected_capacity = remaining_slots[selected] // required_capacity_per_pod
+
+        eligible_selected = selected[selected_capacity > 0]
+        if eligible_selected.size > 0:
+            if required_capacity_per_pod == 1:
+                order_metric = remaining_slots[eligible_selected]
+            else:
+                order_metric = remaining_slots[eligible_selected] // required_capacity_per_pod
+            return eligible_selected[np.argsort(-order_metric, kind="stable")]
+
+    if required_capacity_per_pod == 1:
+        eligible_all = np.flatnonzero(remaining_slots > 0)
+        order_metric = remaining_slots[eligible_all] if eligible_all.size > 0 else np.array([])
+    else:
+        eligible_all = np.flatnonzero(remaining_slots >= required_capacity_per_pod)
+        order_metric = (
+            remaining_slots[eligible_all] // required_capacity_per_pod
+            if eligible_all.size > 0
+            else np.array([])
+        )
+
+    if eligible_all.size == 0:
+        return np.empty(0, dtype=np.int32)
+
+    return eligible_all[np.argsort(-order_metric, kind="stable")]
+
+
 def repair_solution(pop, problem):
-    # Keep continuous X for MA dynamics; derive a temporary binary decode for repair.
-    X_cont = np.asarray(pop['position'], dtype=np.float32)
+    X_cont = np.asarray(pop["position"], dtype=np.float32)
     X = np.round(X_cont).astype(np.int8)
     X = np.clip(X, 0, 1).astype(np.float32)
 
-    g = np.asarray(problem['g'], dtype=np.int32)
-    G = np.asarray(problem['G'], dtype=np.int32)
-    p = np.asarray(problem['p'], dtype=np.int32)
+    p = np.asarray(problem["p"], dtype=np.int32)
+    effective_g = np.asarray(problem["effective_g"], dtype=np.int32)
+    remaining_slots = np.asarray(problem["remaining_stage2_capacity"], dtype=np.int32).copy()
 
     PN, M = X.shape
     Q = np.zeros((PN, M), dtype=np.int32)
     Y = np.zeros((PN, M), dtype=np.int32)
 
-    # remaining_slots[m] = how many slots are still free in pod m
-    remaining_slots = G.copy()
-    feasible = True
+    seed_random_allocation(problem, Q, Y)
+    feasible = bool(problem["random_stage_feasible"])
 
-    # Fill each SKU's demand across already-selected pods only
-    for i in range(PN):
-        demand = int(max(0, g[i]))
-        if demand == 0:
+    for entity in problem["stage2_entities"]:
+        members = np.asarray(entity["member_indices"], dtype=np.int32)
+        leader_idx = int(entity["leader_idx"])
+        member_count = int(entity["member_count"])
+        slots_per_member = int(entity["slots_per_member"])
+
+        if slots_per_member <= 0:
             continue
 
-        if p[i] <= 0:
+        pod_order = build_pod_order(X[leader_idx], remaining_slots, member_count)
+        if pod_order.size == 0:
             feasible = False
             continue
 
-        selected = np.where(X[i, :] == 1)[0]
-        if selected.size == 0:
-            feasible = False
-            continue
+        remaining_equal_slots = slots_per_member
+        remaining_quantity = effective_g[members].astype(np.int32).copy()
 
-        # Prefer pods with more remaining free slots
-        selected_order = selected[np.argsort(-remaining_slots[selected])]
-
-        for m in selected_order:
-            if demand <= 0:
+        for pod_idx in pod_order:
+            if remaining_equal_slots <= 0:
                 break
 
-            if remaining_slots[m] <= 0:
+            shareable_slots = int(remaining_slots[pod_idx] // member_count)
+            if shareable_slots <= 0:
                 continue
 
-            max_qty = int(remaining_slots[m]) * int(p[i])
-            if max_qty <= 0:
+            allocated_slots = min(remaining_equal_slots, shareable_slots)
+            if allocated_slots <= 0:
                 continue
 
-            requested_qty = min(demand, max_qty)
-            if requested_qty <= 0:
-                continue
+            for member_pos, member_idx in enumerate(members):
+                Y[int(member_idx), int(pod_idx)] = allocated_slots
+                slot_capacity = int(allocated_slots) * int(p[int(member_idx)])
+                allocated_quantity = min(int(remaining_quantity[member_pos]), slot_capacity)
+                Q[int(member_idx), int(pod_idx)] = allocated_quantity
+                remaining_quantity[member_pos] -= allocated_quantity
 
-            old_slots = Y[i, m]
-            prev_qty = int(Q[i, m])
-            Q[i, m] += requested_qty
-            new_slots = int(np.ceil(Q[i, m] / p[i]))
-            extra_slots = new_slots - old_slots
+            remaining_slots[pod_idx] -= allocated_slots * member_count
+            remaining_equal_slots -= allocated_slots
 
-            # Safety guard
-            if extra_slots > remaining_slots[m]:
-                extra_slots = int(remaining_slots[m])
-                new_slots = old_slots + extra_slots
-                Q[i, m] = min(Q[i, m], new_slots * int(p[i]))
-
-            # Decrease remaining demand by the quantity actually allocated in this pod.
-            actual_qty = int(max(0, Q[i, m] - prev_qty))
-
-            Y[i, m] = new_slots
-            remaining_slots[m] -= extra_slots
-            demand -= actual_qty
-
-        if demand > 0:
+        if remaining_equal_slots > 0 or np.any(remaining_quantity > 0):
             feasible = False
 
-    # Actual used support after decoding
-    X_used = (Q > 0).astype(np.float32)
+    X_used = (Y > 0).astype(np.float32)
 
-    # Do not overwrite continuous position; store decoded support separately.
-    pop['position_bin'] = X_used
-    pop['quantity_num'] = Q
-    pop['compartment_num'] = Y
-    pop['is_feasible'] = feasible
+    pop["position_bin"] = X_used
+    pop["quantity_num"] = Q
+    pop["compartment_num"] = Y
+    pop["is_feasible"] = feasible
     return pop
 
 
-# %%
-# Create a problem builder
-def RMFSproblem(Dimensions, U, S, G, g, p, lam):
+def build_default_stage_meta(g, p, G):
+    PN = int(len(g))
+    historical_indices = np.arange(PN, dtype=np.int32)
+    stage_required_slots = np.ceil(
+        np.asarray(g, dtype=np.float32) / np.asarray(p, dtype=np.float32)
+    ).astype(np.int32)
+    return {
+        "effective_g": np.asarray(g, dtype=np.int32),
+        "stage_required_slots": stage_required_slots,
+        "historical_indices": historical_indices,
+        "common_new_indices": np.empty(0, dtype=np.int32),
+        "random_new_indices": np.empty(0, dtype=np.int32),
+        "common_group_leaders": np.empty(0, dtype=np.int32),
+        "common_group_members": {},
+        "group_follower_indices": np.empty(0, dtype=np.int32),
+        "stage2_entities": [
+            {
+                "leader_idx": int(idx),
+                "member_indices": np.asarray([idx], dtype=np.int32),
+                "member_count": 1,
+                "slots_per_member": int(stage_required_slots[idx]),
+                "total_load": int(stage_required_slots[idx]),
+            }
+            for idx in historical_indices
+        ],
+        "stage2_required_indices": historical_indices,
+        "fixed_random_allocation": {},
+        "remaining_stage2_capacity": np.asarray(G, dtype=np.int32),
+        "random_stage_feasible": True,
+        "summary": {
+            "historical_skus": PN,
+            "common_new_skus": 0,
+            "random_new_skus": 0,
+            "common_groups": 0,
+            "fallback_common_to_random": 0,
+            "average_historical_slots": 0,
+            "total_required_slots": int(stage_required_slots.sum()),
+        },
+    }
+
+
+def RMFSproblem(Dimensions, U, S, G, g, p, lam, stage_meta=None):
     U = np.asarray(U, dtype=np.float32)
     S = np.asarray(S, dtype=np.float32)
-    G = np.asarray(G, dtype=np.float32)
-    g = np.asarray(g, dtype=np.float32)
-    p = np.asarray(p, dtype=np.float32)
+    G = np.asarray(G, dtype=np.int32)
+    g = np.asarray(g, dtype=np.int32)
+    p = np.asarray(p, dtype=np.int32)
 
-    # Build reward
-    W = (1.00 - lam) * U + lam * S
+    if stage_meta is None:
+        stage_meta = build_default_stage_meta(g, p, G)
 
-    # Enforce symmetry and zero diagonal
+    # Current experiment variant uses only the Jaccard matrix in the objective.
+    W = U.copy()
     W = 0.5 * (W + W.T)
     np.fill_diagonal(W, 0.0)
 
-    W_sparse = sp.csr_matrix(W)
+    historical_indices = np.asarray(stage_meta["historical_indices"], dtype=np.int32)
+    if historical_indices.size > 0:
+        W_stage2 = W[np.ix_(historical_indices, historical_indices)]
+    else:
+        W_stage2 = np.zeros((0, 0), dtype=np.float32)
+
+    W_stage2_sparse = sp.csr_matrix(W_stage2)
+
+    VarMin = np.zeros((Dimensions[0], Dimensions[1]), dtype=np.float32)
+    VarMax = np.ones((Dimensions[0], Dimensions[1]), dtype=np.float32)
+
+    for idx, allocation in stage_meta["fixed_random_allocation"].items():
+        fixed_row = np.zeros(Dimensions[1], dtype=np.float32)
+        fixed_row[allocation["pods"]] = 1.0
+        VarMin[int(idx), :] = fixed_row
+        VarMax[int(idx), :] = fixed_row
+
+    follower_indices = np.asarray(stage_meta["group_follower_indices"], dtype=np.int32)
+    if follower_indices.size > 0:
+        VarMin[follower_indices, :] = 0.0
+        VarMax[follower_indices, :] = 0.0
 
     problem = {
-        'CostFunction': RMFSobjective,
-        'RepairFunction': repair_solution,
-        'nVar': Dimensions,
-
-        'U': U,
-        'S': S,
-        'G': G,
-        'g': g,
-        'p': p,
-        'lam': lam,
-
-        'W_sparse': W_sparse,
-        'ValidateFeasibility': True,
-
-        'VarMin': np.zeros((Dimensions[0], Dimensions[1]), dtype=np.float32),
-        'VarMax': np.ones((Dimensions[0], Dimensions[1]), dtype=np.float32),
-        'StopCriterion': None,
-        'Max/Min': 1,
-        'ProblemStructure': {
-            'position': None,
-            'position_bin': None,
-            'quantity_num': None,
-            'compartment_num': None,
-            'cost': None,
-        }
+        "CostFunction": RMFSobjective,
+        "RepairFunction": repair_solution,
+        "nVar": Dimensions,
+        "U": U,
+        "S": S,
+        "G": G,
+        "g": g,
+        "p": p,
+        "lam": lam,
+        "W_stage2_sparse": W_stage2_sparse,
+        "ValidateFeasibility": True,
+        "VarMin": VarMin,
+        "VarMax": VarMax,
+        "StopCriterion": None,
+        "Max/Min": 1,
+        "effective_g": np.asarray(stage_meta["effective_g"], dtype=np.int32),
+        "stage_required_slots": np.asarray(stage_meta["stage_required_slots"], dtype=np.int32),
+        "historical_indices": historical_indices,
+        "common_new_indices": np.asarray(stage_meta["common_new_indices"], dtype=np.int32),
+        "random_new_indices": np.asarray(stage_meta["random_new_indices"], dtype=np.int32),
+        "common_group_leaders": np.asarray(stage_meta["common_group_leaders"], dtype=np.int32),
+        "common_group_members": stage_meta["common_group_members"],
+        "group_follower_indices": follower_indices,
+        "stage2_entities": stage_meta["stage2_entities"],
+        "stage2_required_indices": np.asarray(stage_meta["stage2_required_indices"], dtype=np.int32),
+        "fixed_random_allocation": stage_meta["fixed_random_allocation"],
+        "remaining_stage2_capacity": np.asarray(stage_meta["remaining_stage2_capacity"], dtype=np.int32),
+        "random_stage_feasible": bool(stage_meta["random_stage_feasible"]),
+        "StageSummary": stage_meta.get("summary", {}),
+        "ProblemStructure": {
+            "position": None,
+            "position_bin": None,
+            "quantity_num": None,
+            "compartment_num": None,
+            "cost": None,
+            "is_feasible": None,
+        },
     }
     return problem
