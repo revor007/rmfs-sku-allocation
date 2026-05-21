@@ -1,0 +1,25 @@
+﻿section,statistic,value
+Dataset,Source file,訂單資料_final.csv
+Data features,No. series,4784.0
+Data features,No. obs./series,21.0
+% Zero values,Mean,54.8605
+% Zero values,S.D.,32.5601
+% Zero values,Maximum,95.2381
+% Zero values,75%ile,85.7143
+% Zero values,50%ile,61.9048
+% Zero values,25%ile,23.8095
+% Zero values,Minimum,0.0
+Average of nonzero demands,Mean,23.2301
+Average of nonzero demands,S.D.,101.7524
+Average of nonzero demands,Maximum,3225.4286
+Average of nonzero demands,75%ile,8.5514
+Average of nonzero demands,50%ile,3.0
+Average of nonzero demands,25%ile,1.6667
+Average of nonzero demands,Minimum,1.0
+CV of nonzero demands,Mean,57.931
+CV of nonzero demands,S.D.,36.9894
+CV of nonzero demands,Maximum,290.8775
+CV of nonzero demands,75%ile,79.3511
+CV of nonzero demands,50%ile,59.9393
+CV of nonzero demands,25%ile,38.7298
+CV of nonzero demands,Minimum,0.0

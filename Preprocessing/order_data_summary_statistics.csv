@@ -1,0 +1,30 @@
+﻿metric,value
+source_file,訂單資料_final.csv
+total_line_items,250925
+unique_orders,54221
+unique_skus,4784
+unique_product_names,4800
+rows_with_missing_timestamp,0
+date_range_start,2021-08-01 00:57:00
+date_range_end,2021-08-21 23:53:00
+active_days,21
+total_quantity,2014434.0
+total_sales,56023467.162763566
+average_price_per_piece,68.762196388463
+median_price_per_piece,44.0
+average_line_items_per_order,4.6278194795374485
+median_line_items_per_order,2.0
+average_distinct_skus_per_order,4.450213017096697
+median_distinct_skus_per_order,2.0
+average_quantity_per_order,37.152284170339904
+median_quantity_per_order,24.0
+average_sales_per_order,1033.24297159336
+median_sales_per_order,737.3
+average_daily_orders,2581.9523809523807
+median_daily_orders,1936.0
+average_daily_line_items,11948.809523809523
+median_daily_line_items,11146.0
+average_daily_quantity,95925.42857142857
+median_daily_quantity,86666.0
+average_daily_sales,2667784.1506077885
+median_daily_sales,2500231.442038289
