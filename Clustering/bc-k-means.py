@@ -125,6 +125,11 @@ def classify_new_product(candidate_df: pd.DataFrame, new_code: str) -> dict:
             final_cluster = current_df.copy()
             break
 
+        new_encoded_rows = encoded_df[encoded_df["item_code"] == new_code]
+        if new_encoded_rows.empty:
+            final_cluster = current_df.copy()
+            break
+
         n_clusters = int(np.ceil(len(encoded_df) / MAX_CLUSTER_SIZE))
         n_unique_points = np.unique(
             encoded_df[feature_columns].to_numpy(dtype=float),
@@ -146,9 +151,9 @@ def classify_new_product(candidate_df: pd.DataFrame, new_code: str) -> dict:
 
         km = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         encoded_df["cluster"] = km.fit_predict(encoded_df[feature_columns])
-        new_cluster = encoded_df.loc[
-            encoded_df["item_code"] == new_code, "cluster"
-        ].iloc[0]
+        new_cluster = new_encoded_rows.assign(
+            cluster=encoded_df.loc[new_encoded_rows.index, "cluster"].to_numpy()
+        )["cluster"].iloc[0]
         problem_cluster = encoded_df[encoded_df["cluster"] == new_cluster].copy()
 
         if len(problem_cluster) <= MAX_CLUSTER_SIZE:

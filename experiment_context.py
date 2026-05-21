@@ -282,19 +282,7 @@ def load_experiment_context(base_dir: Path, cutoff_ratio: float | None = None) -
         PRODUCT_SKU_CANDIDATES,
         sep=";",
     )
-    translated_skus = load_sku_set_from_file(
-        paths.translated_info_path,
-        TRANSLATED_SKU_CANDIDATES,
-        sep=";",
-    )
-    max_capacity_skus = load_sku_set_from_file(
-        paths.max_capacity_path,
-        ["item_code"],
-        sep=None,
-    )
-
-    aligned_support_skus = metadata_skus & translated_skus & max_capacity_skus
-    train_aligned_df = train_df[train_df["item_code"].isin(aligned_support_skus)].copy()
+    train_aligned_df = train_df[train_df["item_code"].isin(metadata_skus)].copy()
     train_order_counts = (
         train_aligned_df.groupby("item_code")["order_id"].nunique().astype(np.int32)
     )
@@ -307,7 +295,7 @@ def load_experiment_context(base_dir: Path, cutoff_ratio: float | None = None) -
     test_eligible_df = test_df[test_df["item_code"].isin(eligible_skus)].copy()
 
     removed_post_t_zero_history_skus = sorted(
-        (set(test_df["item_code"].unique()) & aligned_support_skus) - set(eligible_skus)
+        (set(test_df["item_code"].unique()) & metadata_skus) - set(eligible_skus)
     )
 
     sku_status_df = pd.DataFrame({"item_code": eligible_skus})
