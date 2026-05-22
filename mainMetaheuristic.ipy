@@ -47,14 +47,15 @@ from dataPreparation import load_data_rmfs
 
 base_dir = Path(__file__).resolve().parent
 path_U = base_dir / "jaccard_similarity_matrix.csv"
+path_S = base_dir / "same_cluster_matrix.csv"
 path_min_inv = base_dir / "minimum_inventory.csv"
 path_max_cap = base_dir / "max_comp_number.csv"
 path_stage1 = base_dir / "Clustering" / "bc-k-means-results.csv"
 
 G_scalar = 40
 print('Reading data files', flush=True)
-U, sku_codes, G, g, p, lam, M, stage_meta = load_data_rmfs(
-    path_U, path_min_inv, G_scalar, path_max_cap, path_stage1=path_stage1
+U, S, sku_codes, G, g, p, lam, M, stage_meta = load_data_rmfs(
+    path_U, path_S, path_min_inv, G_scalar, path_max_cap, path_stage1=path_stage1
 )
 PN = len(sku_codes)
 Dimensions = [PN, M]
@@ -66,7 +67,7 @@ print(f"[STAGE] {stage_meta.get('summary', {})}", flush=True)
 # Build problem
 from objective import RMFSproblem
 PN = len(sku_codes)
-problem = RMFSproblem(Dimensions, U, G, g, p, lam, stage_meta=stage_meta)
+problem = RMFSproblem(Dimensions, U, S, G, g, p, lam, stage_meta=stage_meta)
 problem['InitPopSize'] = InitPopSize
 print(f"[CONF] MaxFuncEvals={MaxFuncEvals}, MaxIter={MaxIter}, trials={trials}, InitPopSize={InitPopSize}", flush=True)
 

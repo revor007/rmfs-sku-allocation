@@ -215,11 +215,14 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
     }
 
 
-def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, random_seed=42):
+def load_data(path_u, path_s, path_min_inv, G_scalar, path_max_cap, path_stage1=None, random_seed=42):
     U_df = pd.read_csv(path_u, sep=";", decimal=",", engine="python", index_col=0)
+    S_df = pd.read_csv(path_s, sep=";", decimal=",", engine="python", index_col=0)
 
     U_df.index = U_df.index.map(normalize_item_code)
     U_df.columns = U_df.columns.map(normalize_item_code)
+    S_df.index = S_df.index.map(normalize_item_code)
+    S_df.columns = S_df.columns.map(normalize_item_code)
 
     g_df = pd.read_csv(path_min_inv, sep=";", decimal=",", engine="python")
     
@@ -241,21 +244,24 @@ def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, ra
     eligible_skus = set(load_experiment_context(Path(path_u).resolve().parent).eligible_skus)
     common_skus = sorted(
         set(U_df.index)
+        & set(S_df.index)
         & set(g_df.index)
         & set(p_df.index)
         & eligible_skus
     )
     if not common_skus:
         raise ValueError(
-            "No common SKUs were found across U, minimum inventory, max capacity, "
+            "No common SKUs were found across U, S, minimum inventory, max capacity, "
             "and the cutoff-aligned eligible SKU universe."
         )
 
     U_df = U_df.reindex(index=common_skus, columns=common_skus)
+    S_df = S_df.reindex(index=common_skus, columns=common_skus)
     g_df = g_df.reindex(index=common_skus)
     p_df = p_df.reindex(index=common_skus)
 
     U = U_df.to_numpy(dtype=np.float32)
+    S = S_df.to_numpy(dtype=np.float32)
     g = np.ceil(g_df[g_value_col].to_numpy()).astype(np.int32)
     p = np.floor(pd.to_numeric(p_df[p_value_col], errors="coerce").to_numpy()).astype(np.int32)
 
@@ -277,16 +283,17 @@ def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, ra
     G = stage_meta["G"].copy()
     M = int(stage_meta["M"])
 
-    return U, common_skus, G, effective_g, p, M, stage_meta
+    return U, S, common_skus, G, effective_g, p, M, stage_meta
 
 
-def load_data_rmfs(path_u, path_min_inv, G_scalar, path_max_cap, lam=0.5, path_stage1=None, random_seed=42):
-    U, sku_codes, G, g, p, M, stage_meta = load_data(
+def load_data_rmfs(path_u, path_s, path_min_inv, G_scalar, path_max_cap, lam=0.5, path_stage1=None, random_seed=42):
+    U, S, sku_codes, G, g, p, M, stage_meta = load_data(
         path_u=path_u,
+        path_s=path_s,
         path_min_inv=path_min_inv,
         G_scalar=G_scalar,
         path_max_cap=path_max_cap,
         path_stage1=path_stage1,
         random_seed=random_seed,
     )
-    return U, sku_codes, G, g, p, lam, M, stage_meta
+    return U, S, sku_codes, G, g, p, lam, M, stage_meta
