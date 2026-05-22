@@ -259,7 +259,13 @@ def prepare_inputs(
 
     raw_ordered_skus = set(context.order_df["item_code"].unique())
     eligible_ordered_skus = set(context.eligible_skus)
-    coverage_skus = set(required_coverage_skus) if required_coverage_skus is not None else set(eligible_ordered_skus)
+    max_comp_skus = set(max_comp["item_code"].dropna())
+    feasible_ordered_skus = eligible_ordered_skus & max_comp_skus
+    coverage_skus = (
+        set(required_coverage_skus)
+        if required_coverage_skus is not None
+        else feasible_ordered_skus
+    )
     excluded_order_skus = sorted(raw_ordered_skus - eligible_ordered_skus)
     allocated_skus = set(allocation["item_code"].unique())
     missing_allocation = sorted(coverage_skus - allocated_skus)
