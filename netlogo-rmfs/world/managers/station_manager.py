@@ -41,14 +41,12 @@ class StationManager:
     def createPickerStation(self, x: int, y: int, data: pd.DataFrame):
         obj = Picker(self.picker_counter, x, y, data)
         self.picker_counter += 1
-        self.picking_stations.append(obj)
-        self.stations_by_id[obj.id] = obj
+        self.addStation(obj)
     
     def createReplenishmentStation(self, x: int, y: int, data: pd.DataFrame):
         obj = Replenishment(self.replenishment_counter, x, y, data)
         self.replenishment_counter += 1
-        self.replenishment_stations.append(obj)
-        self.stations_by_id[obj.id] = obj
+        self.addStation(obj)
     
     def findAvailablePickingStation(self) -> Optional[Station]:
         # Filter stations that have capacity
@@ -89,7 +87,9 @@ class StationManager:
         return available_station
 
     def findHighestSimilarityStation(self, skus_in_order, pod_manager: PodManager) -> Optional[Station]:
-        available_station_rank = pd.DataFrame(columns=["station_id", "similarity_score"])
+        available_station_rank = pd.DataFrame(
+            columns=["station_id", "similarity_score", "order_count", "incoming_pod_count"]
+        )
         sku_in_order_list = [i for i in skus_in_order]
         available_station = []
         assignStation = None
@@ -120,13 +120,40 @@ class StationManager:
                     similarity_score = len(station_pod_skus_in_order)
 
                     available_station_rank = pd.concat([available_station_rank , 
-                                                pd.DataFrame([[station.station_id, similarity_score]], columns=["station_id", "similarity_score"])], ignore_index=True) 
+                                                pd.DataFrame(
+                                                    [[
+                                                        station.station_id,
+                                                        similarity_score,
+                                                        len(station.order_ids),
+                                                        len(station.incoming_pod),
+                                                    ]],
+                                                    columns=[
+                                                        "station_id",
+                                                        "similarity_score",
+                                                        "order_count",
+                                                        "incoming_pod_count",
+                                                    ],
+                                                )], ignore_index=True) 
             
-            available_station_rank.sort_values(by=["similarity_score"], ascending=False, inplace=True)
-            available_station_rank.reset_index(drop=True, inplace=True)
-
             if len(available_station_rank) > 0:
-                assignStation_id = available_station_rank.loc[0, "station_id"]
+                max_similarity = available_station_rank["similarity_score"].max()
+
+                if max_similarity <= 0:
+                    return self.findAvailablePickingStation()
+
+                best_rows = available_station_rank[
+                    available_station_rank["similarity_score"] == max_similarity
+                ].copy()
+
+                min_order_count = best_rows["order_count"].min()
+                best_rows = best_rows[best_rows["order_count"] == min_order_count]
+
+                min_incoming_pods = best_rows["incoming_pod_count"].min()
+                best_rows = best_rows[
+                    best_rows["incoming_pod_count"] == min_incoming_pods
+                ]
+
+                assignStation_id = random.choice(best_rows["station_id"].tolist())
                 assignStation = self.getStationById(assignStation_id)
         elif len(available_station) == 1:
             assignStation = available_station[0]

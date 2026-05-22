@@ -25,6 +25,10 @@ class Station(Object):
         self.skus_in_station = {} # {A:[5,10], B:[10]}
         self.incoming_pod: List[int] = []
 
+    @property
+    def station_id(self):
+        return self.id
+
     def setStationManager(self, station_manager):
         self.station_manager = station_manager
 

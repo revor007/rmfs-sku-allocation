@@ -251,6 +251,22 @@ class PodManager:
          if sku in self.skus_data:
             self.skus_data[sku]['current_global_qty'] -= quantity # current_global_qty -> ngecek warehouse threshold
             self.skus_data[sku]['global_inv_level'] = self.skus_data[sku]['current_global_qty'] / self.skus_data[sku]['max_global_qty']
+
+    def increaseSKUData(self, sku, quantity):
+        if quantity <= 0 or sku not in self.skus_data:
+            return
+
+        sku_data = self.skus_data[sku]
+        sku_data['current_global_qty'] += quantity
+        if sku_data['current_global_qty'] > sku_data['max_global_qty']:
+            sku_data['current_global_qty'] = sku_data['max_global_qty']
+
+        if sku_data['max_global_qty'] > 0:
+            sku_data['global_inv_level'] = (
+                sku_data['current_global_qty'] / sku_data['max_global_qty']
+            )
+        else:
+            sku_data['global_inv_level'] = 0
     
     def isSKUNeedReplenishment(self, sku_id):
         if float(self.skus_data[sku_id]['global_inv_level']) <= float(self.skus_data[sku_id]['global_threshold_inv_level']):
