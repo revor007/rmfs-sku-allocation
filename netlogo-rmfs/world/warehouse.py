@@ -505,14 +505,27 @@ class Warehouse:
         skus_to_replenish = job.skus_for_replenishment
         
         skus_replenished = 0
+        restored_quantities = {}
         if skus_to_replenish:
+            before_qty = {
+                sku_id: pod.skus[sku_id]['current_qty']
+                for sku_id in skus_to_replenish
+                if sku_id in pod.skus
+            }
             # Suruh pod untuk mengisi HANYA SKU yang ada di daftar.
             skus_replenished = pod.replenishFlaggedSKUs(skus_to_replenish)
+            for sku_id, old_qty in before_qty.items():
+                new_qty = pod.skus[sku_id]['current_qty']
+                restored_qty = max(0, new_qty - old_qty)
+                if restored_qty > 0:
+                    restored_quantities[sku_id] = restored_qty
+                    self.pod_manager.increaseSKUData(sku_id, restored_qty)
 
         # Update metrik
         self.replenishment_count += skus_replenished
         # Pastikan ini satu-satunya tempat counter trip di-update!
         self.replenishment_trips += 1
+        pod.is_awaiting_replenishment = False
         
         pod_number = pod.pod_number
         if pod_number in self.replenished_pods:
@@ -533,14 +546,14 @@ class Warehouse:
 
         write_to_csv("order-finished.csv", header, data, self.landscape.current_date_string)
 
-    def insertReplenishmentDataToCSV(self, job: Job, skus_replenished: int, replenishment_time: int):
+    def insertReplenishmentDataToCSV(self, job: Job, skus_replenished: int):
         """
         Menyimpan data operasi replenishment ke CSV.
         Sekarang menerima objek 'job' untuk data yang lebih lengkap.
         """
         # 1. "Bongkar" semua info yang kita butuhkan dari object 'job'
         pod_id = job.pod.pod_number
-        replenishment_time = job.replenishment_delay
+        replenishment_time = getattr(job, "replenishment_delay_total", job.replenishment_delay)
         station_id = job.station_id
         sku_list_str = str(job.skus_for_replenishment)
 
@@ -839,11 +852,22 @@ class Warehouse:
                     continue
                     
                 # Send pod for replenishment
-                success = self.sendPodForReplenishment(best_pod, available_station)
+                success = self.sendPodForReplenishment(
+                    best_pod,
+                    available_station,
+                    [sku],
+                    None,
+                )
                 if success:
                     print(f"Pod {best_pod.pod_number} sent for proactive replenishment of SKU {sku}")
 
-    def sendPodForReplenishment(self, pod, station, skus_to_replenish: list, robot: Robot):
+    def sendPodForReplenishment(
+        self,
+        pod,
+        station,
+        skus_to_replenish: Optional[List[str]] = None,
+        robot: Optional[Robot] = None,
+    ):
         """
         Send a specific pod to replenishment station.
         
@@ -855,6 +879,8 @@ class Warehouse:
         """
         if pod is None or station is None:
             return False
+        if pod.is_awaiting_replenishment:
+            return False
             
         # Check if pod is already busy
         # if not pod.is_idle:
@@ -865,11 +891,25 @@ class Warehouse:
         if not hasattr(pod, 'coordinate') or pod.coordinate is None:
             print(f"Pod {pod.pod_number} has invalid coordinate")
             return False
+
+        if skus_to_replenish is None:
+            skus_to_replenish = []
+
+        if robot is None:
+            robot = self.robot_manager.findNearestAvailableRobot(pod.coordinate)
+            if robot is None:
+                print(f"No available robot found for replenishment job on pod {pod.pod_number}")
+                return False
             
         try:
             # Create replenishment job
-            new_job = self.job_manager.createJob(pod.coordinate, station_id=station.id, pod=pod, skus_for_replenishment=skus_to_replenish)
-            # new_job.addReplenishmentTask(pod)
+            new_job = self.job_manager.createJob(
+                pod.coordinate,
+                station_id=station.id,
+                pod=pod,
+                skus_for_replenishment=skus_to_replenish,
+            )
+            new_job.addReplenishmentTask(pod, skus_to_replenish)
             
             # Find available robot to handle the job
             # nearest_robot = self.robot_manager.findNearestAvailableRobot(pod.coordinate)
@@ -879,7 +919,8 @@ class Warehouse:
                 
             # Assign job to robot
             robot.assignJobAndSetToStation(new_job)
-            self.pod_manager.setPodNotAvailable(pod.coordinate)
+            self.pod_manager.setPodNotAvailable(pod)
+            pod.is_awaiting_replenishment = True
             
             # Track replenishment metrics
             # self.replenishment_trips += 1

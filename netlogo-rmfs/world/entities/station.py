@@ -25,6 +25,10 @@ class Station(Object):
         self.skus_in_station = {} # {A:[5,10], B:[10]}
         self.incoming_pod: List[int] = []
 
+    @property
+    def station_id(self):
+        return self.id
+
     def setStationManager(self, station_manager):
         self.station_manager = station_manager
 
@@ -121,6 +125,7 @@ class Station(Object):
     
     def construct_station_path(self, data: DataFrame, start_x, start_y, short_path=True):
         station_path: List[NetLogoCoordinate] = [NetLogoCoordinate(start_x, start_y)]
+        row_count, col_count = data.shape
 
         x_increment = 1 if self.object_type == 'picker' else -1
         if not short_path:
@@ -131,12 +136,12 @@ class Station(Object):
 
         # go to bottom
         y, x = start_y + 1, start_x
-        while data.iloc[y, x] in (14, 17, 24, 27):
+        while 0 <= y < row_count and 0 <= x < col_count and data.iloc[y, x] in (14, 17, 24, 27):
             station_path.insert(0, NetLogoCoordinate(x, y))
 
             if data.iloc[y, x] in (17, 27):
                 x += x_increment
-                while data.iloc[y, x] in (13, 23):
+                while 0 <= y < row_count and 0 <= x < col_count and data.iloc[y, x] in (13, 23):
                     station_path.insert(0, NetLogoCoordinate(x, y))
                     x += x_increment
 

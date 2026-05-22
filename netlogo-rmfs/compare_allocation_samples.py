@@ -508,6 +508,25 @@ def main():
     )
     args = parser.parse_args()
 
+    my_allocation_df_prefilter = pd.read_csv(args.my_allocation)
+    my_allocation_skus_prefilter = set(
+        my_allocation_df_prefilter["item"].map(normalize_item_code)
+    )
+    baseline_candidate_items_prefilter = load_cindy_candidate_items(
+        items_path=cindy_root / "data" / "output" / "items.csv",
+        max_comp_path=FCGMA_DIR / "max_comp_number.csv",
+    )
+    baseline_candidate_skus_prefilter = set(
+        baseline_candidate_items_prefilter["item_code"]
+    )
+    common_covered_skus_prefilter = {
+        sku
+        for sku in (
+            my_allocation_skus_prefilter & baseline_candidate_skus_prefilter
+        )
+        if sku
+    }
+
     full_cutoff_orders_path = script_dir / "data" / "input" / "cutoff_test_orders.csv"
     if True:
         prepare_inputs(
@@ -516,6 +535,7 @@ def main():
             metadata_path=preprocessing_dir / "preprocessed_final.csv",
             translated_info_path=preprocessing_dir / "儲格設計_原檔(商品資訊)(Translated).csv",
             max_comp_path=FCGMA_DIR / "max_comp_number.csv",
+            required_coverage_skus=common_covered_skus_prefilter,
         )
 
     my_allocation_df = pd.read_csv(args.my_allocation)

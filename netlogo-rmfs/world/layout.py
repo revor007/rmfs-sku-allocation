@@ -37,8 +37,13 @@ class Layout(object):
             int(self.total_pods_active) + int(self.total_charging_stations),
         )
         positions_per_band = self.podCellsPerVerticalBand()
-        self.pod_batch_vertical_max = max(
+        minimum_station_bands = max(
             1,
+            (int(self.order_picker_total) * 2) - 1,
+            (int(self.order_replenishment_total) * 2) - 1,
+        )
+        self.pod_batch_vertical_max = max(
+            minimum_station_bands,
             math.ceil(minimum_positions / positions_per_band),
         )
 
@@ -111,6 +116,8 @@ class Layout(object):
     def getStationPositions(self, total_station):
         total_numbers = self.determineStationLimits()
         numbers = list(range(1, total_numbers + 1))
+        if not numbers:
+            return []
         selected_sequence = []
         middle_index = len(numbers) // 2
 
@@ -120,7 +127,13 @@ class Layout(object):
             else:
                 offset = -(i // 2) - 1
 
-            selected_sequence.append(numbers[middle_index + offset])
+            candidate_index = middle_index + offset
+            if candidate_index < 0:
+                candidate_index = 0
+            elif candidate_index >= len(numbers):
+                candidate_index = len(numbers) - 1
+
+            selected_sequence.append(numbers[candidate_index])
 
         return sorted(selected_sequence)
 

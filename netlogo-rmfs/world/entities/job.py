@@ -19,6 +19,7 @@ class Job:
         self.picking_delay = 0
         self.replenishment_delay_per_sku = 15
         self.replenishment_delay = 0 # Ganti
+        self.replenishment_delay_total = 0
         self.is_finished = False
         self.skip_count = 0
         self.skus_for_replenishment = skus_for_replenishment
@@ -34,9 +35,15 @@ class Job:
         self.orders.append((order_id, sku, quantity))
         self.picking_delay += self.picking_delay_per_sku
     
-    def addReplenishmentTask(self, pod):
-        total_skus = len(pod.skus)
-        self.replenishment_delay += total_skus * self.replenishment_delay_per_sku
+    def addReplenishmentTask(self, pod, sku_ids: Optional[list] = None):
+        if sku_ids is None:
+            total_skus = len(pod.skus)
+        else:
+            total_skus = len(sku_ids)
+
+        added_delay = total_skus * self.replenishment_delay_per_sku
+        self.replenishment_delay += added_delay
+        self.replenishment_delay_total += added_delay
 
     def isBeingProcessed(self):
         """Check if the job is being processed based on delays."""
@@ -73,6 +80,5 @@ class Job:
                 self.pickup_distance,
                 drop_off_distance
             ])
-
 
 
