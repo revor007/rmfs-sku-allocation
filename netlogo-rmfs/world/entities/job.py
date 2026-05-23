@@ -15,9 +15,11 @@ class Job:
         self.pod = pod
         self.station_id = station_id
         self.orders = []  # This will hold tuples of (order_id, sku, quantity)
-        self.picking_delay_per_sku = 15 # Time for handling a task
+        # Delay values are in simulation steps, not replay-time ticks.
+        self.picking_delay_per_sku = float(os.getenv("RMFS_PICKING_DELAY_PER_SKU", "3.5"))
         self.picking_delay = 0
-        self.replenishment_delay_per_sku = 15
+        # 3.5 steps ~= 0.525 replay minutes because each step advances _tick by 0.15.
+        self.replenishment_delay_per_sku = float(os.getenv("RMFS_REPLENISHMENT_DELAY_PER_SKU", "3.5"))
         self.replenishment_delay = 0 # Ganti
         self.replenishment_delay_total = 0
         self.is_finished = False
@@ -52,9 +54,9 @@ class Job:
     def decrementDelay(self):
         """Decrement the picking or replenishment delay."""
         if self.picking_delay > 0:
-            self.picking_delay -= 1
+            self.picking_delay = max(0, self.picking_delay - 1)
         elif self.replenishment_delay > 0:
-            self.replenishment_delay -= 1
+            self.replenishment_delay = max(0, self.replenishment_delay - 1)
 
     def popOrder(self):
         return self.orders.pop(0)
@@ -80,5 +82,3 @@ class Job:
                 self.pickup_distance,
                 drop_off_distance
             ])
-
-
