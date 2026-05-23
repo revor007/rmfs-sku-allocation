@@ -123,16 +123,11 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
     # not the leader SKU's demand level.
     effective_g = np.asarray(g, dtype=np.int32).copy()
 
+    # Use each SKU's raw minimum-inventory slot demand directly.
+    # Random-new products no longer inherit a historical average slot floor.
     stage_required_slots = np.ceil(effective_g / p).astype(np.int32)
     historical_slots = stage_required_slots[np.asarray(historical_indices, dtype=np.int32)]
     average_historical_slots = int(max(1, np.ceil(historical_slots.mean()))) if historical_slots.size else 1
-
-    if random_new_indices:
-        random_idx = np.asarray(random_new_indices, dtype=np.int32)
-        stage_required_slots[random_idx] = np.maximum(
-            stage_required_slots[random_idx],
-            average_historical_slots,
-        )
 
     common_group_members = {}
     common_group_leaders = sorted(common_groups)

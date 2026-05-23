@@ -1,8 +1,8 @@
 ﻿section,dataset,column,metric,value
-verification,product_final,,row_count,4833
-verification,order_final,,row_count,249870
-verification,alignment,,product_unique_item_codes,4833
-verification,alignment,,order_unique_item_codes,4833
+verification,product_final,,row_count,4820
+verification,order_final,,row_count,221169
+verification,alignment,,product_unique_item_codes,4820
+verification,alignment,,order_unique_item_codes,4820
 verification,alignment,,product_only_item_codes,0
 verification,alignment,,order_only_item_codes,0
 verification,product_final,item_code,missing_item_code_rows,0

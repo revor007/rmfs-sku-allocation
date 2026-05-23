@@ -14,6 +14,7 @@ WORKSPACE_DIR = BASE_DIR.parent
 
 RAW_PRODUCT_DATA_CANDIDATES = [
     WORKSPACE_DIR / "Webscrapping" / "webscraping_result.csv",
+    WORKSPACE_DIR.parent / "Webscrapping" / "webscraping_result.csv",
 ]
 MASTER_PRODUCT_DATA_CANDIDATES = [
     BASE_DIR / "儲格設計_原檔(商品資訊).csv",
@@ -33,8 +34,14 @@ ORDER_TEST_OUTPUT_PATH = BASE_DIR / "訂單資料_test.csv"
 ANALYSIS_SUMMARY_PATH = BASE_DIR / "data_cleaning_analysis_summary.csv"
 VERIFICATION_SUMMARY_PATH = BASE_DIR / "data_cleaning_verification_summary.csv"
 SPLIT_SUMMARY_PATH = BASE_DIR / "data_cleaning_split_summary.csv"
+SPLIT_ORDER_THRESHOLD_PATH = BASE_DIR / "split_order_thresholds.csv"
+SPLIT_ORDER_OUTPUT_PATH = BASE_DIR / "訂單資料_split_orders.csv"
 FILTERED_DATA_DIR = BASE_DIR / "Filtered Data"
-DEFAULT_CUTOFF_RATIO = 0.70
+# Keep preprocessing exports aligned with the shared experiment cutoff
+# used by experiment_context.py: T = 17 days within a 21-day horizon.
+DEFAULT_CUTOFF_RATIO = 17.0 / 21.0
+DEFAULT_SPLIT_ORDER_IQR_MULTIPLIER = 3.0
+DEFAULT_SPLIT_ORDER_MIN_SAMPLES = 4
 
 MASTER_ITEM_CODE_CANDIDATES = ["item_code", "Item Code"]
 MASTER_QUERY_CANDIDATES = ["註記", "註記 (Notes)"]
@@ -628,6 +635,81 @@ def clean_order_dataset(order_df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str,
     return cleaned, order_frequency, order_name_lookup
 
 
+def reroute_split_orders(
+    order_df: pd.DataFrame,
+    iqr_multiplier: float = DEFAULT_SPLIT_ORDER_IQR_MULTIPLIER,
+    min_samples: int = DEFAULT_SPLIT_ORDER_MIN_SAMPLES,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    if min_samples < 1:
+        raise ValueError("min_samples must be at least 1.")
+
+    aggregated_lines = (
+        order_df.groupby(["order_id", "item_code"], as_index=False)
+        .agg(
+            quantity=("quantity", "sum"),
+            created_at=("created_at", "first"),
+            item_name=("item_name", "first"),
+        )
+        .sort_values(["item_code", "quantity", "order_id"])
+        .reset_index(drop=True)
+    )
+
+    threshold_records: list[dict[str, object]] = []
+    flagged_indices: list[int] = []
+
+    for item_code, sku_lines in aggregated_lines.groupby("item_code", sort=True):
+        quantities = sku_lines["quantity"].to_numpy(dtype=float)
+        sample_count = int(quantities.size)
+        q1 = float(np.quantile(quantities, 0.25)) if sample_count else np.nan
+        q3 = float(np.quantile(quantities, 0.75)) if sample_count else np.nan
+        iqr = float(q3 - q1) if sample_count else np.nan
+
+        if sample_count < min_samples:
+            upper_bound = np.inf
+            threshold_status = "insufficient_samples"
+        elif np.isclose(iqr, 0.0):
+            upper_bound = np.inf
+            threshold_status = "zero_iqr_no_outlier_rule"
+        else:
+            upper_bound = float(q3 + iqr_multiplier * iqr)
+            threshold_status = "iqr_rule"
+
+        outlier_mask = sku_lines["quantity"].gt(upper_bound)
+        if np.isfinite(upper_bound) and outlier_mask.any():
+            flagged_indices.extend(sku_lines.index[outlier_mask].tolist())
+
+        threshold_records.append(
+            {
+                "item_code": item_code,
+                "sample_count": sample_count,
+                "q1": q1,
+                "q3": q3,
+                "iqr": iqr,
+                "upper_bound": upper_bound if np.isfinite(upper_bound) else np.nan,
+                "max_quantity": float(np.max(quantities)) if sample_count else np.nan,
+                "outlier_order_line_count": int(outlier_mask.sum()),
+                "threshold_status": threshold_status,
+            }
+        )
+
+    flagged_order_lines = aggregated_lines.loc[sorted(set(flagged_indices))].copy()
+    flagged_order_lines["split_reason"] = "sku_quantity_outlier_iqr"
+    split_order_ids = set(flagged_order_lines["order_id"].astype(str))
+
+    filtered_order_df = order_df[~order_df["order_id"].isin(split_order_ids)].copy()
+    split_order_df = order_df[order_df["order_id"].isin(split_order_ids)].copy()
+
+    filtered_order_df = filtered_order_df.sort_values(
+        ["created_at", "order_id", "item_code", "item_name"]
+    ).reset_index(drop=True)
+    split_order_df = split_order_df.sort_values(
+        ["created_at", "order_id", "item_code", "item_name"]
+    ).reset_index(drop=True)
+
+    threshold_df = pd.DataFrame(threshold_records).sort_values("item_code").reset_index(drop=True)
+    return filtered_order_df, split_order_df, flagged_order_lines, threshold_df
+
+
 def choose_best_candidate_item_code(
     title_value: object,
     query_value: object,
@@ -1044,7 +1126,7 @@ def build_preprocessed_datasets(
     raw_product_df: pd.DataFrame,
     master_product_df: pd.DataFrame,
     raw_order_df: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     master_by_item_code, master_note_groups = prepare_master_product_data(master_product_df)
     cleaned_order_df, order_frequency, order_name_lookup = clean_order_dataset(raw_order_df)
 
@@ -1083,7 +1165,21 @@ def build_preprocessed_datasets(
         order_df=cleaned_order_df,
     )
 
-    return finalize_product_columns(aligned_product_df), aligned_order_df
+    filtered_order_df, split_order_df, _, split_threshold_df = reroute_split_orders(
+        aligned_order_df
+    )
+    filtered_item_codes = set(filtered_order_df["item_code"].map(normalize_item_code))
+    filtered_product_df = aligned_product_df[
+        aligned_product_df["item_code"].isin(filtered_item_codes)
+    ].copy()
+    filtered_product_df = filtered_product_df.sort_values(["item_code"]).reset_index(drop=True)
+
+    return (
+        finalize_product_columns(filtered_product_df),
+        filtered_order_df,
+        split_order_df,
+        split_threshold_df,
+    )
 
 
 def build_verification_summary(
@@ -1301,7 +1397,12 @@ def main() -> None:
     )
     rule_summary_df = build_rule_summary(issue_counts)
 
-    product_final_df, order_final_df = build_preprocessed_datasets(
+    (
+        product_final_df,
+        order_final_df,
+        split_order_df,
+        split_threshold_df,
+    ) = build_preprocessed_datasets(
         raw_product_df=raw_product_df,
         master_product_df=master_product_df,
         raw_order_df=raw_order_df,
@@ -1321,6 +1422,40 @@ def main() -> None:
         order_df=order_final_df,
         cutoff_ratio=DEFAULT_CUTOFF_RATIO,
     )
+    split_summary_df = pd.concat(
+        [
+            split_summary_df,
+            pd.DataFrame(
+                [
+                    {
+                        "metric": "split_order_iqr_multiplier",
+                        "value": DEFAULT_SPLIT_ORDER_IQR_MULTIPLIER,
+                    },
+                    {
+                        "metric": "split_order_min_samples",
+                        "value": DEFAULT_SPLIT_ORDER_MIN_SAMPLES,
+                    },
+                    {
+                        "metric": "split_order_rows_removed",
+                        "value": int(len(split_order_df)),
+                    },
+                    {
+                        "metric": "split_order_unique_orders_removed",
+                        "value": int(split_order_df["order_id"].nunique()),
+                    },
+                    {
+                        "metric": "split_order_unique_item_codes_removed",
+                        "value": int(split_order_df["item_code"].nunique()),
+                    },
+                    {
+                        "metric": "sku_thresholds_with_outliers",
+                        "value": int(split_threshold_df["outlier_order_line_count"].gt(0).sum()),
+                    },
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
 
     PRODUCT_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     product_output_path = save_dataframe(
@@ -1334,6 +1469,14 @@ def main() -> None:
     order_output_path = save_dataframe(
         order_final_df,
         ORDER_OUTPUT_PATH,
+        index=False,
+        encoding="utf-8-sig",
+        sep=";",
+        decimal=",",
+    )
+    split_order_output_path = save_dataframe(
+        split_order_df,
+        SPLIT_ORDER_OUTPUT_PATH,
         index=False,
         encoding="utf-8-sig",
         sep=";",
@@ -1389,6 +1532,14 @@ def main() -> None:
         index=False,
         encoding="utf-8-sig",
     )
+    split_threshold_output_path = save_dataframe(
+        split_threshold_df,
+        SPLIT_ORDER_THRESHOLD_PATH,
+        index=False,
+        encoding="utf-8-sig",
+        sep=";",
+        decimal=",",
+    )
     filtered_paths = export_filtered_frames(product_final_df, FILTERED_DATA_DIR)
 
     print(f"Raw product data:      {safe_console_text(raw_product_path)}")
@@ -1398,6 +1549,7 @@ def main() -> None:
     print(f"Order rows exported:   {len(order_final_df):,}")
     print(f"Product output CSV:    {safe_console_text(product_output_path)}")
     print(f"Order output CSV:      {safe_console_text(order_output_path)}")
+    print(f"Split-order CSV:       {safe_console_text(split_order_output_path)}")
     print(f"Product train CSV:     {safe_console_text(product_train_output_path)}")
     print(f"Product test CSV:      {safe_console_text(product_test_output_path)}")
     print(f"Order train CSV:       {safe_console_text(order_train_output_path)}")
@@ -1405,6 +1557,7 @@ def main() -> None:
     print(f"Analysis summary:      {safe_console_text(analysis_output_path)}")
     print(f"Verification summary:  {safe_console_text(verification_output_path)}")
     print(f"Split summary:         {safe_console_text(split_summary_output_path)}")
+    print(f"Split thresholds:      {safe_console_text(split_threshold_output_path)}")
     print(
         "Filtered exports:      "
         f"{len(filtered_paths)} files in {safe_console_text(FILTERED_DATA_DIR)}"

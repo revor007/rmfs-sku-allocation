@@ -109,7 +109,7 @@ class PodManager:
 
             assigned_pod = None
             if len(pod_available_for_multiple_items) > 0:
-                assigned_pod_id = pod_available_for_multiple_items.loc[0, "pod_id"]
+                assigned_pod_id = pod_available_for_multiple_items.iloc[0]["pod_id"]
            
                 assigned_pod = self.getPodByNumber(assigned_pod_id)
         
@@ -164,7 +164,7 @@ class PodManager:
 
             assigned_pod = None
             if len(pod_available_for_multiple_items) > 0:
-                assigned_pod_id = pod_available_for_multiple_items.loc[0, "pod_id"]
+                assigned_pod_id = pod_available_for_multiple_items.iloc[0]["pod_id"]
            
                 assigned_pod = self.getPodByNumber(assigned_pod_id)
         
