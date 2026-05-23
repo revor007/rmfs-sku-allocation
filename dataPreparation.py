@@ -61,6 +61,8 @@ def allocate_random_new_products(random_new_indices, stage_required_slots, p, g,
                     quantity_unsorted[pos] = assigned_quantity
                     remaining_quantity -= assigned_quantity
                 quantity = quantity_unsorted
+                if remaining_quantity > 0:
+                    feasible = False
 
         allocation[int(idx)] = {
             "pods": pods,
@@ -117,16 +119,20 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
         set(range(PN)) - set(random_new_indices) - set(common_new_indices)
     )
 
+    # Keep each SKU's own target quantity; common allocation shares placement,
+    # not the leader SKU's demand level.
     effective_g = np.asarray(g, dtype=np.int32).copy()
-    for hist_idx, followers in common_groups.items():
-        effective_g[np.asarray(followers, dtype=np.int32)] = effective_g[int(hist_idx)]
 
     stage_required_slots = np.ceil(effective_g / p).astype(np.int32)
     historical_slots = stage_required_slots[np.asarray(historical_indices, dtype=np.int32)]
     average_historical_slots = int(max(1, np.ceil(historical_slots.mean()))) if historical_slots.size else 1
 
     if random_new_indices:
-        stage_required_slots[np.asarray(random_new_indices, dtype=np.int32)] = average_historical_slots
+        random_idx = np.asarray(random_new_indices, dtype=np.int32)
+        stage_required_slots[random_idx] = np.maximum(
+            stage_required_slots[random_idx],
+            average_historical_slots,
+        )
 
     common_group_members = {}
     common_group_leaders = sorted(common_groups)
