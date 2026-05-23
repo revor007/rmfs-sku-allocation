@@ -557,6 +557,8 @@ class Warehouse:
         self.replenishment_trips += 1
         pod.is_awaiting_replenishment = False
         pod.has_pending_replenishment_dispatch = False
+        if restored_quantities:
+            self.recheck_on_hold_orders_for_skus(restored_quantities.keys())
         
         pod_number = pod.pod_number
         if pod_number in self.replenished_pods:
@@ -786,6 +788,30 @@ class Warehouse:
             if can_be_fulfilled:
                 print(f"Order {order.id} is now fulfillable! Removing from hold.")
                 order.on_hold = False
+
+    def recheck_on_hold_orders_for_skus(self, replenished_skus):
+        target_skus = {sku for sku in replenished_skus if sku}
+        if not target_skus:
+            return 0
+
+        released_orders = 0
+        on_hold_orders = [o for o in self.order_manager.unfinished_orders if o.on_hold]
+        for order in on_hold_orders:
+            remaining_skus = order.getRemainingSKU()
+            if not remaining_skus:
+                continue
+            if not any(sku in remaining_skus for sku in target_skus):
+                continue
+
+            can_be_fulfilled, _ = self.canFulfillOrder(order)
+            if can_be_fulfilled:
+                print(
+                    f"Order {order.id} is now fulfillable after replenishment! Removing from hold."
+                )
+                order.on_hold = False
+                released_orders += 1
+
+        return released_orders
 
     def canFulfillOrder(self, order):
         """
