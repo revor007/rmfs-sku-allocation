@@ -772,6 +772,7 @@ class Robot(Object):
 
             elif self.current_state == "station_processing":
                 station: Station = self.robot_manager.warehouse.station_manager.getStationById(self.job.station_id)
+                station.removePod(self.job.pod.pod_number)
                 station.addRobot(self.robotName())
                 self.setPath(self.transformCoordinatesToList(station.getRobotRoute(self.robotName())))
 

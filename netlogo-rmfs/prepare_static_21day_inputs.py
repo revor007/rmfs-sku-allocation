@@ -506,7 +506,6 @@ def main():
     fcgma_dir = find_existing_directory(
         [
             workspace_dir,
-            workspace_dir / "fcgma",
             workspace_dir / "revision-fcgma-copy",
             workspace_dir / "revision-fcgma - Copy" / "rmfs-sku-allocation",
             workspace_dir.parent / "fcgma",

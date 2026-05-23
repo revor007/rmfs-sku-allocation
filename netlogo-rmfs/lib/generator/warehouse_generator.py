@@ -1,3 +1,4 @@
+import os
 from typing import List
 
 from sklearn.cluster import KMeans
@@ -19,7 +20,7 @@ pods_path = os.path.join(PARENT_DIRECTORY, 'data/output/pods.csv')
 
 def init_robots(warehouse: Warehouse):
     random.seed(42)  # Set a seed for reproducibility - Ryan
-    num_robot = 20 # Number of robots
+    num_robot = int(os.getenv("RMFS_NUM_ROBOTS", "20"))
     # num_robot = 25 # Number of robots
     
     robots = []

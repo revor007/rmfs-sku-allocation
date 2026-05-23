@@ -1,4 +1,5 @@
 from typing import List, Optional, Dict, TYPE_CHECKING
+import os
 from pandas import DataFrame
 from world.entities.object import Object
 from lib.types.netlogo_coordinate import NetLogoCoordinate
@@ -17,7 +18,7 @@ class Station(Object):
         self.long_path = self.construct_station_path(data, x, y, short_path=False)
         self.order_ids: List[int] = []
         self.orders: List[Order] = []
-        self.max_orders = 8 # Picking station capacity
+        self.max_orders = int(os.getenv("RMFS_MAX_ORDERS_PER_STATION", "8"))
         self.short_path_threshold = 4
         self.robot_ids = {}
         self.is_using_short_route = True
@@ -54,10 +55,12 @@ class Station(Object):
             self.orders.remove(order)
 
     def addPod(self, pod):
-        self.incoming_pod.append(pod)
+        if pod not in self.incoming_pod:
+            self.incoming_pod.append(pod)
     
     def removePod(self, pod):
-        self.incoming_pod.remove(pod)
+        if pod in self.incoming_pod:
+            self.incoming_pod.remove(pod)
 
     def isPickerStation(self) -> bool:
         return self.object_type == "picker"

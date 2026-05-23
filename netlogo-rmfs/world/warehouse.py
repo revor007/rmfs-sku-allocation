@@ -1465,17 +1465,34 @@ class Warehouse:
 
         # ================= LOGIKA BARU START =================
         
-        # 2. Kumpulin dulu semua request berdasarkan Pod yang tersedia
-        # Format: {pod_id: {'pod_object': Pod, 'requests': [req1, req2, ...]}}
-        requests_by_pod = {}
+        # 2. Kumpulin dulu semua request berdasarkan kombinasi (station, pod)
+        # Ini mencegah satu job membawa task dari station yang berbeda.
+        # Format: {(station_id, pod_id): {'pod_object': Pod, 'station_id': str, 'requests': [req1, req2, ...]}}
+        requests_by_group = {}
+        available_robot_coords = [[robot.pos_x, robot.pos_y] for robot in available_robots]
         
         # Simpan request yang pod-nya nggak ketemu/sibuk untuk ditaruh lagi di antrian
         unprocessed_requests = [] 
 
         for request in self.sku_picking_queue:
             sku_id = request['sku']
-            # Coba cari pod yang tersedia untuk SKU ini
-            available_pod = self.pod_manager.getAvailablePod(sku_id)
+            order = self.order_manager.getOrderById(request['order_id'])
+            if order is None or order.station_id is None:
+                unprocessed_requests.append(request)
+                continue
+
+            order_station = self.station_manager.getStationById(order.station_id)
+            skus_in_station_dict = order_station.getSKUsInStationDict()
+
+            # Gunakan pemilihan pod yang mempertimbangkan kebutuhan station agar pile-on lebih baik.
+            available_pod = self.pod_manager.getAvailablePodInventory(
+                sku_id,
+                skus_in_station_dict,
+                order_station.coordinate,
+                available_robot_coords,
+            )
+            if available_pod is None:
+                available_pod = self.pod_manager.getAvailablePod(sku_id)
             
             # Jika pod TIDAK ditemukan atau sedang nunggu restock, skip dulu
             # Request ini akan diproses di tick berikutnya
@@ -1484,18 +1501,30 @@ class Warehouse:
                 continue
 
             pod_id = available_pod.pod_number
+            group_key = (order.station_id, pod_id)
             
-            # Masukkan request ke 'rombongan' pod-nya
-            if pod_id not in requests_by_pod:
-                requests_by_pod[pod_id] = {'pod_object': available_pod, 'requests': []}
+            # Masukkan request ke 'rombongan' pod dan station-nya
+            if group_key not in requests_by_group:
+                requests_by_group[group_key] = {
+                    'pod_object': available_pod,
+                    'station_id': order.station_id,
+                    'requests': [],
+                }
             
-            requests_by_pod[pod_id]['requests'].append(request)
+            requests_by_group[group_key]['requests'].append(request)
 
-        # 3. Sekarang, proses setiap 'rombongan' per Pod
+        # 3. Sekarang, proses setiap 'rombongan' per Pod/Station.
+        # Prioritaskan grup terbesar supaya satu kunjungan pod mengerjakan lebih banyak task.
         processed_requests = [] # Untuk mencatat semua request yang berhasil jadi Job
         
+        grouped_assignments = sorted(
+            requests_by_group.items(),
+            key=lambda item: len(item[1]['requests']),
+            reverse=True,
+        )
+
         # Kita iterasi pada dictionary rombongan yang sudah dibuat
-        for pod_id, data in requests_by_pod.items():
+        for (_, _), data in grouped_assignments:
             # Cek lagi, robotnya masih ada nggak?
             if not available_robots:
                 # Jika robot habis, sisa rombongan ini akan dicoba lagi di tick selanjutnya
@@ -1503,31 +1532,41 @@ class Warehouse:
                 continue
 
             pod_object = data['pod_object']
+            station_id = data['station_id']
             pod_requests = data['requests']
+
+            # Pod yang sama bisa muncul di grup station lain dari snapshot awal queue.
+            # Begitu satu grup sudah mengambil pod ini, grup lain harus ditunda.
+            if not pod_object.is_idle or pod_object.is_awaiting_replenishment:
+                unprocessed_requests.extend(pod_requests)
+                continue
 
             # Cari robot terdekat untuk ngambil pod ini
             robot_to_assign = self.robot_manager.findNearestAvailableRobot(pod_object.coordinate)
 
             if robot_to_assign:
                 # Hanya buat SATU job untuk satu pod ini
-                # Ambil detail order dari request pertama sebagai acuan station_id
-                first_request = pod_requests[0]
-                order = self.order_manager.getOrderById(first_request['order_id'])
-
                 job = self.job_manager.createJob(
                     pod_object.coordinate,
-                    station_id=order.station_id, # Asumsi semua order di pod ini ke stasiun yg sama, atau bisa di-adjust
+                    station_id=station_id,
                     pod=pod_object
                 )
                 
                 # BORONG SEMUA! Masukkan semua task dari rombongan ini ke job yang sama
                 for req in pod_requests:
+                    order = self.order_manager.getOrderById(req['order_id'])
+                    if order is None:
+                        continue
+
+                    order.commitQuantity(req['sku'], req['qty'])
                     job.addPickingTask(req['order_id'], req['sku'], req['qty'])
+
                     # Update DataFrame atau status tracking lo
                     self.assign_order_df.loc[((self.assign_order_df['order_id'] == req['order_id']) & (self.assign_order_df['item_id'] == req['sku'])), 'assigned_pod'] = int(pod_object.pod_number)
                     self.assign_order_df.loc[((self.assign_order_df['order_id'] == req['order_id']) & (self.assign_order_df['item_id'] == req['sku'])), 'status'] = 0 # Status: Assigned
 
                 # Assign robot dan kunci resource
+                self.station_manager.getStationById(station_id).addPod(pod_object.pod_number)
                 robot_to_assign.assignJobAndSetToTakePod(job)
                 self.pod_manager.setPodNotAvailable(pod_object)
                 available_robots.remove(robot_to_assign)

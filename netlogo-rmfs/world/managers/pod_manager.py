@@ -512,17 +512,20 @@ class PodManager:
             return distance_to_robot_score
 
         distances = manhattan_distances(pod_coordinate, robots_coordinate)
-        distance_to_robot_score = np.argmin(distances)
+        distance_to_robot_score = float(np.min(distances))
         
         return distance_to_robot_score
     
     def _countFulfillment(self, skus_in_station_dict, pod_skus):
         total_fulfillment = 1
-        pod_skus_copy = pod_skus.copy()
+        pod_skus_copy = {
+            sku: details.get("current_qty", 0)
+            for sku, details in pod_skus.items()
+        }
         for sku in skus_in_station_dict:
             for order_qty in skus_in_station_dict[sku]:
-                if sku in pod_skus_copy and pod_skus_copy[sku]["current_qty"] >= order_qty:
-                    pod_skus_copy[sku]["current_qty"] -= order_qty
+                if sku in pod_skus_copy and pod_skus_copy[sku] >= order_qty:
+                    pod_skus_copy[sku] -= order_qty
                     total_fulfillment += 1
                 else: 
                     continue
