@@ -189,13 +189,23 @@ def prepare_inputs(
     metadata["item_code"] = metadata["item_code"].map(normalize_item_code)
 
     translated = load_semicolon_csv(translated_info_path)
-    translated_code_col = find_column(translated.columns, ["item code"])
-    translated_name_col = find_column(translated.columns, ["notes_en", "notes"])
-    translated_length_col = find_column(translated.columns, ["length carton", "(箱)長"])
-    translated_width_col = find_column(translated.columns, ["width", "(箱)寬"])
-    translated_height_col = find_column(translated.columns, ["heigth", "height", "(箱)高"])
-    translated_weight_col = find_column(translated.columns, ["weigth", "weight", "(箱)重量"])
-    translated_units_col = find_column(translated.columns, ["number of cartons", "箱入數"])
+    translated_code_col = find_column(translated.columns, ["item code", "item_code"])
+    translated_name_col = find_column(translated.columns, ["notes_en", "notes", "title"])
+    translated_length_col = find_column(
+        translated.columns, ["length carton", "(箱)長", "carton_length_cm"]
+    )
+    translated_width_col = find_column(
+        translated.columns, ["width", "(箱)寬", "carton_width_cm"]
+    )
+    translated_height_col = find_column(
+        translated.columns, ["heigth", "height", "(箱)高", "carton_height_cm"]
+    )
+    translated_weight_col = find_column(
+        translated.columns, ["weigth", "weight", "(箱)重量", "carton_weight"]
+    )
+    translated_units_col = find_column(
+        translated.columns, ["number of cartons", "箱入數", "units_per_carton"]
+    )
 
     translated = translated[
         [
