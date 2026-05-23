@@ -105,6 +105,12 @@ class Warehouse:
         
         self.adaptive_policy = AdaptiveReplenishmentPolicy()
         self.use_adaptive_replenishment = False  # Flag to control which policy to use
+        self.global_critical_skus = set()
+        self.global_watchlist_interval = int(os.getenv("RMFS_GLOBAL_WATCHLIST_TICKS", "300"))
+        self.global_watchlist_threshold = float(os.getenv("RMFS_GLOBAL_WATCHLIST_THRESHOLD", "0.9"))
+        self.pod_replenishment_threshold = float(os.getenv("RMFS_POD_REPLENISHMENT_THRESHOLD", "0.4"))
+        self.last_watchlist_refresh_tick = -1
+        self.last_hold_recheck_tick = -1
         
         self.sku_picking_queue = []  # Queue for SKUs that need to be picked
     
@@ -262,12 +268,25 @@ class Warehouse:
         # if int(self._tick) == 1 or (int(self._tick) > 1 and (int(self._tick) - 1) % 3600 == 0):
         #     self.calculateAndSaveInventoryRatio()
         
-        # Proactive SKU flagging - check every 300 ticks (5 minutes simulation time)
-        if self._tick > 0 and int(self._tick) % 300 == 0:
+        # Refresh the global watchlist and sweep idle pods on the same cadence.
+        current_tick = int(self._tick)
+
+        if (
+            current_tick > 0
+            and current_tick % self.global_watchlist_interval == 0
+            and current_tick != self.last_watchlist_refresh_tick
+        ):
             self.update_global_sku_watchlist()
-            
-        if self._tick > 0 and int(self._tick) % 500 == 0:
+            self.checkAndTriggerProactiveReplenishment()
+            self.last_watchlist_refresh_tick = current_tick
+             
+        if (
+            current_tick > 0
+            and current_tick % 500 == 0
+            and current_tick != self.last_hold_recheck_tick
+        ):
             self.recheck_on_hold_orders()
+            self.last_hold_recheck_tick = current_tick
 
         # Ngitung energy + replenishment
         total_energy = 0
@@ -804,62 +823,37 @@ class Warehouse:
 
     def checkAndTriggerProactiveReplenishment(self):
         """
-        Proactively check for SKUs that need replenishment based on warehouse inventory levels.
-        This runs periodically during tick() to ensure continuous monitoring.
+        Periodically sweep idle pods and trigger replenishment using the same
+        pod-health + global-watchlist rule as the post-pick replenishment path.
         """
-        UL = 0.3  # Upper threshold for warehouse inventory level
-        KL = 0.3  # Lower threshold for pod replenishment index
+        if not self.global_critical_skus:
+            return
 
-        # Get all flagged SKUs that are below the warehouse threshold
-        flagged_skus = self.pod_manager.getFlaggedSKUs(UL)
-        
-        if not flagged_skus:
-            return  # No SKUs need replenishment
-            
-        print(f"Proactive replenishment check found {len(flagged_skus)} flagged SKUs: {flagged_skus}")
-        
-        # For each flagged SKU, find pods that need replenishment
-        skus_needing_replenishment = []
-        
-        for sku in flagged_skus:
-            # Find the best pod candidate for this SKU
-            best_pod = self.pod_manager.getBestReplenishmentCandidate(sku)
-            if best_pod is None:
+        candidate_pods = []
+        for pod in self.pod_manager.getAllPods():
+            if pod is None or not pod.is_idle or pod.is_awaiting_replenishment:
                 continue
-                
-            # Check if this pod actually needs replenishment for this SKU
-            if self.use_adaptive_replenishment:
-                need_replenish = self.pod_manager.checkAdaptiveReplenishmentPolicy(best_pod)
-            else:
-                need_replenish = self.pod_manager.checkWarehouseSKUPodPolicy(best_pod, UL, KL)
-                
-            if need_replenish:
-                skus_needing_replenishment.append(sku)
-        
-        # Trigger replenishment for SKUs that need it
-        if skus_needing_replenishment:
-            print(f"Triggering proactive replenishment for {len(skus_needing_replenishment)} SKUs")
-            
-            for sku in skus_needing_replenishment:
-                best_pod = self.pod_manager.getBestReplenishmentCandidate(sku)
-                if best_pod is None:
-                    continue
-                    
-                # Check if replenishment station is available
-                available_station = self.station_manager.findAvailableReplenishmentStation()
-                if available_station is None:
-                    print(f"No available replenishment station for proactive replenishment of SKU {sku}")
-                    continue
-                    
-                # Send pod for replenishment
-                success = self.sendPodForReplenishment(
-                    best_pod,
-                    available_station,
-                    [sku],
-                    None,
-                )
-                if success:
-                    print(f"Pod {best_pod.pod_number} sent for proactive replenishment of SKU {sku}")
+
+            skus_to_replenish, qj_score = self.get_replenishment_skus_for_pod(pod)
+            if skus_to_replenish:
+                candidate_pods.append((qj_score, pod, skus_to_replenish))
+
+        # Lowest-health pods first.
+        candidate_pods.sort(key=lambda item: item[0])
+
+        for _, pod, skus_to_replenish in candidate_pods:
+            available_station = self.station_manager.findAvailableReplenishmentStation()
+            if available_station is None:
+                break
+
+            success = self.sendPodForReplenishment(
+                pod,
+                available_station,
+                skus_to_replenish,
+                None,
+            )
+            if not success:
+                continue
 
     def sendPodForReplenishment(
         self,
@@ -1642,18 +1636,60 @@ class Warehouse:
         Fungsi ini nge-scan semua SKU di gudang dan bikin daftar mana aja
         yang stoknya tipis secara global.
         """
-        UL = 0.9  # Ambang batas global
         self.global_critical_skus = set()  # Pake 'set' biar cepet ngeceknya nanti
 
         all_skus_data = self.pod_manager.getAllSKUData() # Ambil data semua SKU
 
         for sku_id, data in all_skus_data.items():
+            max_qty = data['max_global_qty']
+            if max_qty <= 0:
+                continue
+
             # Hitung level kesehatan global (Ui)
-            global_level = data['current_global_qty'] / data['max_global_qty']
+            global_level = data['current_global_qty'] / max_qty
             
             # Kalo di bawah ambang batas, masukin ke daftar kritis
-            if global_level < UL:
+            if global_level < self.global_watchlist_threshold:
                 self.global_critical_skus.add(sku_id)
+
+    def get_pod_average_fill_score(self, pod: Pod) -> float:
+        if not pod.skus:
+            return 1.0
+
+        total_inventory_level = 0.0
+        counted_skus = 0
+        for details in pod.skus.values():
+            limit_qty = details.get('limit_qty', 0)
+            if limit_qty <= 0:
+                continue
+
+            total_inventory_level += details.get('current_qty', 0) / limit_qty
+            counted_skus += 1
+
+        if counted_skus == 0:
+            return 1.0
+
+        return total_inventory_level / counted_skus
+
+    def get_replenishment_skus_for_pod(self, pod: Pod) -> tuple[list, float]:
+        """
+        Shared replenishment rule used by both the post-pick trigger and the
+        periodic idle-pod sweep.
+
+        Returns a tuple of:
+        - list of SKUs to replenish
+        - the pod average-fill score (Qj)
+        """
+        if pod is None or not pod.skus:
+            return [], 1.0
+
+        qj_score = self.get_pod_average_fill_score(pod)
+        if qj_score >= self.pod_replenishment_threshold:
+            return [], qj_score
+
+        pod_sku_set = set(pod.skus.keys())
+        skus_to_replenish = sorted(pod_sku_set.intersection(self.global_critical_skus))
+        return skus_to_replenish, qj_score
     
     def trigger_bundled_proactive_replenishment(self, pod: Pod, robot: Robot):
         """
@@ -1661,34 +1697,10 @@ class Warehouse:
         replenishment JIKA skornya di bawah threshold.
         Hanya me-replenish SKU yang ada di daftar kritis global.
         """
-        # Langkah 1: Hitung Skor Kesehatan Rata-rata Pod (Qj)
-        if not pod.skus:  # Kalo pod kosong, gak usah proses
+        skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
+        if not skus_to_replenish:
             return
 
-        total_inventory_level = 0
-        for sku_id, details in pod.skus.items():
-            # Uij = level kesehatan SKU di dalam pod ini
-            level_per_sku = details['current_qty'] / details['limit_qty']
-            total_inventory_level += level_per_sku
-        
-        # Qj = Rata-rata dari semua level kesehatan item di pod
-        qj_score = total_inventory_level / len(pod.skus)
-        
-        # Langkah 2: Bandingkan dengan ambang batas pod (KL)
-        pod_health_threshold = 0.4  # Contoh ambang batas KL
-
-        # Cek apakah skor kesehatan pod jelek
-        if qj_score < pod_health_threshold:
-            
-            # Langkah 3: Tentukan SKU mana yang HARUS diisi ulang
-            # Kita cari irisan antara isi pod dengan daftar kritis global
-            pod_sku_set = set(pod.skus.keys())
-            # Asumsi 'self.global_critical_skus' udah di-update dari Bagian 1
-            skus_to_replenish = list(pod_sku_set.intersection(self.global_critical_skus))
-
-            # Kalo ada item yang perlu diisi...
-            if skus_to_replenish:
-                # Langkah 4: Kirim pod untuk diisi ulang (sisa kodenya sama)
-                available_station = self.station_manager.findAvailableReplenishmentStation()
-                if available_station:
-                    self.sendPodForReplenishment(pod, available_station, skus_to_replenish, robot)
+        available_station = self.station_manager.findAvailableReplenishmentStation()
+        if available_station:
+            self.sendPodForReplenishment(pod, available_station, skus_to_replenish, robot)
