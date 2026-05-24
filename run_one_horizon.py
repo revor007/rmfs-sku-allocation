@@ -35,6 +35,31 @@ def ensure_runtime_input_files(run_root: Path) -> None:
         if not target.exists():
             shutil.copy2(legacy_file, target)
 
+    # Some clones only contain the older Yohana items_dictionary schema, which
+    # lacks the newer `max_fit` column expected by the shared RMFS generator.
+    # When that happens, rebuild the live input dictionary from the prepared
+    # `data/output/items.csv` artifact instead.
+    input_items_dictionary = input_dir / "items_dictionary.csv"
+    output_items = output_dir / "items.csv"
+
+    rebuild_items_dictionary = not input_items_dictionary.exists()
+    if input_items_dictionary.exists():
+        try:
+            existing_columns = pd.read_csv(input_items_dictionary, nrows=0).columns
+            rebuild_items_dictionary = "max_fit" not in existing_columns
+        except Exception:
+            rebuild_items_dictionary = True
+
+    if rebuild_items_dictionary and output_items.exists():
+        items_df = pd.read_csv(output_items)
+
+        # Older writer variants sometimes persisted `item_id` as an unnamed index.
+        unnamed_columns = [col for col in items_df.columns if str(col).startswith("Unnamed:")]
+        if unnamed_columns:
+            items_df = items_df.drop(columns=unnamed_columns, errors="ignore")
+
+        items_df.to_csv(input_items_dictionary, index=False)
+
 
 if len(sys.argv) < 5:
     script_name = Path(sys.argv[0]).name if sys.argv else "run_one_horizon.py"
