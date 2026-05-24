@@ -6,8 +6,12 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from pathlib import Path
+
+try:
+    import seaborn as sns  # noqa: F401
+except ModuleNotFoundError:
+    sns = None
 
 #%%
 print('[START] mainMetaheuristics running', flush=True)
@@ -242,9 +246,20 @@ plt.ioff()
 ## Save data
 df = pd.DataFrame(CompMethod)
 
-# Save the DataFrame to an Excel file
-df.to_excel('results_fcgma/ResultsCompMethod.xlsx', index=False)
-print('[SAVE] Results saved to results_fcgma/ResultsCompMethod.xlsx', flush=True)
+# Save the DataFrame to an Excel file when possible, otherwise fall back to CSV.
+results_dir = base_dir / 'results_fcgma'
+results_dir.mkdir(exist_ok=True)
+results_comp_xlsx = results_dir / 'ResultsCompMethod.xlsx'
+results_comp_csv = results_dir / 'ResultsCompMethod.csv'
+try:
+    df.to_excel(results_comp_xlsx, index=False)
+    print(f'[SAVE] Results saved to {results_comp_xlsx}', flush=True)
+except ModuleNotFoundError:
+    df.to_csv(results_comp_csv, index=False)
+    print(
+        f'[SAVE] openpyxl is unavailable; results saved to {results_comp_csv} instead',
+        flush=True,
+    )
 #del item, i, df, results, MaxIter, MaxFuncEvals, Dimensions, IterPrint, trials, method, user_input   
 
 # %% Measure Time - End

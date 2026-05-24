@@ -27,6 +27,11 @@ def validate_solution(X, Q, Y, problem):
             return False
         if np.any(X[random_new_indices].sum(axis=1) > stage_required_slots[random_new_indices]):
             return False
+        if np.any(
+            Q[random_new_indices].sum(axis=1)
+            < np.asarray(problem["effective_g"], dtype=np.int32)[random_new_indices]
+        ):
+            return False
 
         for idx in random_new_indices:
             allocation = problem["fixed_random_allocation"].get(int(idx))
