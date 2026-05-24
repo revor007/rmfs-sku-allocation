@@ -4,7 +4,7 @@ cutoff_timestamp;2021-08-18 00:05:11.428571
 lead_time_days;1
 target_service_level;0.95
 percentile_method;n_plus_1_linear_interpolation
-eligible_master_skus;3149
-historical_skus;3005
-new_skus;144
-minimum_inventory_skus;3149
+eligible_master_skus;3044
+historical_skus;2928
+new_skus;116
+minimum_inventory_skus;3044

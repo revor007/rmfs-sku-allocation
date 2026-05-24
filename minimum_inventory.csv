@@ -176,7 +176,6 @@
 10023002001;4,0;4;lead_time_percentile_n_plus_one;;19;16;16;16,15;16;0,0
 10023005001;6,0;6;lead_time_percentile_n_plus_one;;13;14;14;14,25;14;0,0
 10023008001;4,0;4;lead_time_percentile_n_plus_one;;9;14;14;14,25;14;0,0
-10023017001;1,0;1;lead_time_percentile_n_plus_one;;6;14;14;14,25;14;0,0
 10023020001;21,0;21;lead_time_percentile_n_plus_one;;98;17;17;17,099999999999998;17;0,0
 10023027001;6,0;6;lead_time_percentile_n_plus_one;;38;17;17;17,099999999999998;17;0,0
 10023031001;5,0;5;lead_time_percentile_n_plus_one;;4;4;4;4,75;4;0,0
@@ -200,7 +199,6 @@
 10024007001;210,0;210;lead_time_percentile_n_plus_one;;131;17;17;17,099999999999998;17;0,0
 10024011001;136,0;136;lead_time_percentile_n_plus_one;;63;17;17;17,099999999999998;17;0,0
 10024014001;40,0;40;lead_time_percentile_n_plus_one;;19;16;16;16,15;16;0,0
-10030001001;12,0;12;lead_time_percentile_n_plus_one;;7;17;17;17,099999999999998;17;0,0
 10030005001;63,0;63;lead_time_percentile_n_plus_one;;42;17;17;17,099999999999998;17;0,0
 10030007001;512,0;512;lead_time_percentile_n_plus_one;;347;17;17;17,099999999999998;17;0,0
 10030008001;168,0;168;lead_time_percentile_n_plus_one;;39;15;15;15,2;15;0,0
@@ -382,7 +380,6 @@
 10052025001;20,0;20;lead_time_percentile_n_plus_one;;66;17;17;17,099999999999998;17;0,0
 10052035001;10,0;10;lead_time_percentile_n_plus_one;;32;16;16;16,15;16;0,0
 10053901001;18,0;18;lead_time_percentile_n_plus_one;;16;15;15;15,2;15;0,0
-10053904001;6,0;6;lead_time_percentile_n_plus_one;;5;13;13;13,299999999999999;13;0,0
 10100132001;48,0;48;lead_time_percentile_n_plus_one;;24;16;16;16,15;16;0,0
 11010005001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 11010007001;14,0;14;lead_time_percentile_n_plus_one;;20;10;10;10,45;10;0,0
@@ -395,7 +392,6 @@
 11010023001;6,0;6;lead_time_percentile_n_plus_one;;10;15;15;15,2;15;0,0
 11010025001;3,0;3;lead_time_percentile_n_plus_one;;8;17;17;17,099999999999998;17;0,0
 11010027001;3,0;3;lead_time_percentile_n_plus_one;;10;15;15;15,2;15;0,0
-11010035001;5,0;5;lead_time_percentile_n_plus_one;;3;8;8;8,549999999999999;8;0,0
 11010040001;6,0;6;lead_time_percentile_n_plus_one;;8;14;14;14,25;14;0,0
 11010042001;6,0;6;lead_time_percentile_n_plus_one;;26;17;17;17,099999999999998;17;0,0
 11010043001;5,0;5;lead_time_percentile_n_plus_one;;12;17;17;17,099999999999998;17;0,0
@@ -412,7 +408,6 @@
 11020013001;3,0;3;lead_time_percentile_n_plus_one;;5;16;16;16,15;16;0,0
 11021006001;4,0;4;lead_time_percentile_n_plus_one;;7;15;15;15,2;15;0,0
 11021013001;2,0;2;lead_time_percentile_n_plus_one;;14;13;13;13,299999999999999;13;0,0
-11021018001;1,0;1;lead_time_percentile_n_plus_one;;2;8;8;8,549999999999999;8;0,0
 11021023001;1,0;1;lead_time_percentile_n_plus_one;;5;11;11;11,399999999999999;11;0,0
 11021025001;2,0;2;lead_time_percentile_n_plus_one;;4;14;14;14,25;14;0,0
 11021026001;2,0;2;lead_time_percentile_n_plus_one;;7;9;9;9,5;9;0,0
@@ -439,7 +434,6 @@
 11022063001;2,0;2;lead_time_percentile_n_plus_one;;6;17;17;17,099999999999998;17;0,0
 11022082001;12,0;12;lead_time_percentile_n_plus_one;;6;6;6;6,6499999999999995;6;0,0
 11023010001;18,0;18;lead_time_percentile_n_plus_one;;11;11;11;11,399999999999999;11;0,0
-11023012001;1,0;1;lead_time_percentile_n_plus_one;;2;9;9;9,5;9;0,0
 11030010001;5,0;5;lead_time_percentile_n_plus_one;;4;4;4;4,75;4;0,0
 11030018001;5,0;5;lead_time_percentile_n_plus_one;;7;13;13;13,299999999999999;13;0,0
 11030062001;5,0;5;lead_time_percentile_n_plus_one;;2;7;7;7,6;7;0,0
@@ -461,7 +455,6 @@
 11032026001;9,0;9;lead_time_percentile_n_plus_one;;4;4;4;4,75;4;0,0
 11032027001;10,0;10;lead_time_percentile_n_plus_one;;18;17;17;17,099999999999998;17;0,0
 11032028001;6,0;6;lead_time_percentile_n_plus_one;;5;11;11;11,399999999999999;11;0,0
-11032031001;2,0;2;lead_time_percentile_n_plus_one;;2;9;9;9,5;9;0,0
 11032035001;6,0;6;lead_time_percentile_n_plus_one;;10;16;16;16,15;16;0,0
 11032036001;5,0;5;lead_time_percentile_n_plus_one;;9;14;14;14,25;14;0,0
 11032037001;24,0;24;lead_time_percentile_n_plus_one;;28;16;16;16,15;16;0,0
@@ -490,7 +483,6 @@
 11040057001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 11040060001;1,0;1;lead_time_percentile_n_plus_one;;2;2;2;2,8499999999999996;2;0,0
 11041002001;5,0;5;lead_time_percentile_n_plus_one;;9;9;9;9,5;9;0,0
-11041005001;2,0;2;lead_time_percentile_n_plus_one;;5;16;16;16,15;16;0,0
 11041007001;2,0;2;lead_time_percentile_n_plus_one;;8;9;9;9,5;9;0,0
 11041014001;6,0;6;lead_time_percentile_n_plus_one;;3;12;12;12,35;12;0,0
 11041017001;4,0;4;lead_time_percentile_n_plus_one;;15;17;17;17,099999999999998;17;0,0
@@ -512,7 +504,6 @@
 11042022001;1,0;1;lead_time_percentile_n_plus_one;;4;14;14;14,25;14;0,0
 11042023001;4,0;4;lead_time_percentile_n_plus_one;;10;17;17;17,099999999999998;17;0,0
 11042027001;3,0;3;lead_time_percentile_n_plus_one;;4;12;12;12,35;12;0,0
-11050002001;4,0;4;lead_time_percentile_n_plus_one;;9;15;15;15,2;15;0,0
 11050003001;2,0;2;lead_time_percentile_n_plus_one;;7;13;13;13,299999999999999;13;0,0
 11050004001;12,0;12;lead_time_percentile_n_plus_one;;81;17;17;17,099999999999998;17;0,0
 11050005001;6,0;6;lead_time_percentile_n_plus_one;;13;14;14;14,25;14;0,0
@@ -583,13 +574,11 @@
 11070015001;2,0;2;lead_time_percentile_n_plus_one;;5;10;10;10,45;10;0,0
 11070016001;4,0;4;lead_time_percentile_n_plus_one;;14;12;12;12,35;12;0,0
 11070018001;3,0;3;lead_time_percentile_n_plus_one;;4;11;11;11,399999999999999;11;0,0
-11070027001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 11070029001;6,0;6;lead_time_percentile_n_plus_one;;17;16;16;16,15;16;0,0
 11070030001;1,0;1;lead_time_percentile_n_plus_one;;3;10;10;10,45;10;0,0
 11070045001;7,0;7;lead_time_percentile_n_plus_one;;21;17;17;17,099999999999998;17;0,0
 11070050001;10,0;10;lead_time_percentile_n_plus_one;;6;7;7;7,6;7;0,0
 11070051001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-11070062001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 11071001001;5,0;5;lead_time_percentile_n_plus_one;;20;17;17;17,099999999999998;17;0,0
 11071002001;2,0;2;lead_time_percentile_n_plus_one;;5;12;12;12,35;12;0,0
 11071004001;9,0;9;lead_time_percentile_n_plus_one;;11;16;16;16,15;16;0,0
@@ -637,7 +626,6 @@
 11100001001;31,0;31;lead_time_percentile_n_plus_one;;37;17;17;17,099999999999998;17;0,0
 11100003001;6,0;6;lead_time_percentile_n_plus_one;;7;15;15;15,2;15;0,0
 11100005001;4,0;4;lead_time_percentile_n_plus_one;;18;17;17;17,099999999999998;17;0,0
-11100007001;1,0;1;lead_time_percentile_n_plus_one;;2;3;3;3,8;3;0,0
 11100008001;14,0;14;lead_time_percentile_n_plus_one;;46;17;17;17,099999999999998;17;0,0
 11100010001;5,0;5;lead_time_percentile_n_plus_one;;10;17;17;17,099999999999998;17;0,0
 11100015001;6,0;6;lead_time_percentile_n_plus_one;;14;16;16;16,15;16;0,0
@@ -678,7 +666,6 @@
 11103054001;10,0;10;lead_time_percentile_n_plus_one;;14;17;17;17,099999999999998;17;0,0
 11103058001;12,0;12;lead_time_percentile_n_plus_one;;18;17;17;17,099999999999998;17;0,0
 11103062001;4,0;4;lead_time_percentile_n_plus_one;;7;17;17;17,099999999999998;17;0,0
-11103065001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 11103067001;3,0;3;lead_time_percentile_n_plus_one;;8;16;16;16,15;16;0,0
 11103068001;4,0;4;lead_time_percentile_n_plus_one;;5;7;7;7,6;7;0,0
 11103069001;7,0;7;lead_time_percentile_n_plus_one;;13;16;16;16,15;16;0,0
@@ -687,18 +674,15 @@
 11103076001;14,0;14;lead_time_percentile_n_plus_one;;18;17;17;17,099999999999998;17;0,0
 11103084001;7,0;7;lead_time_percentile_n_plus_one;;8;9;9;9,5;9;0,0
 11103085001;3,0;3;lead_time_percentile_n_plus_one;;2;4;4;4,75;4;0,0
-11103086002;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 11103088001;5,0;5;lead_time_percentile_n_plus_one;;10;8;8;8,549999999999999;8;0,0
 11103090001;54,0;54;lead_time_percentile_n_plus_one;;141;17;17;17,099999999999998;17;0,0
 11103094001;46,0;46;lead_time_percentile_n_plus_one;;42;14;14;14,25;14;0,0
 11103096001;23,0;23;lead_time_percentile_n_plus_one;;31;17;17;17,099999999999998;17;0,0
 11103098001;13,0;13;lead_time_percentile_n_plus_one;;32;17;17;17,099999999999998;17;0,0
-11103099001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 11103102002;8,0;8;lead_time_percentile_n_plus_one;;4;7;7;7,6;7;0,0
 11103106001;9,0;9;lead_time_percentile_n_plus_one;;16;16;16;16,15;16;0,0
 11103108001;4,0;4;lead_time_percentile_n_plus_one;;2;2;2;2,8499999999999996;2;0,0
 11103114001;15,0;15;lead_time_percentile_n_plus_one;;27;17;17;17,099999999999998;17;0,0
-11103115001;2,0;2;lead_time_percentile_n_plus_one;;5;13;13;13,299999999999999;13;0,0
 11103118001;2,0;2;lead_time_percentile_n_plus_one;;5;16;16;16,15;16;0,0
 11103134001;41,0;41;lead_time_percentile_n_plus_one;;52;17;17;17,099999999999998;17;0,0
 11103135001;24,0;24;lead_time_percentile_n_plus_one;;13;14;14;14,25;14;0,0
@@ -712,13 +696,11 @@
 11103220001;14,0;14;lead_time_percentile_n_plus_one;;15;14;14;14,25;14;0,0
 11103224001;2,0;2;lead_time_percentile_n_plus_one;;6;17;17;17,099999999999998;17;0,0
 11103233001;2,0;2;lead_time_percentile_n_plus_one;;5;11;11;11,399999999999999;11;0,0
-11103256001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 11103262001;4,0;4;lead_time_percentile_n_plus_one;;8;13;13;13,299999999999999;13;0,0
 11103270002;11,0;11;lead_time_percentile_n_plus_one;;16;15;15;15,2;15;0,0
 11103280001;3,0;3;lead_time_percentile_n_plus_one;;9;16;16;16,15;16;0,0
 11103283001;2,0;2;lead_time_percentile_n_plus_one;;3;9;9;9,5;9;0,0
 11103289001;6,0;6;lead_time_percentile_n_plus_one;;13;14;14;14,25;14;0,0
-11103313001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 11103314001;8,0;8;lead_time_percentile_n_plus_one;;6;11;11;11,399999999999999;11;0,0
 11103317001;28,0;28;lead_time_percentile_n_plus_one;;18;9;9;9,5;9;0,0
 11103321002;1,0;1;lead_time_percentile_n_plus_one;;3;3;3;3,8;3;0,0
@@ -806,7 +788,6 @@
 12000317001;8,0;8;lead_time_percentile_n_plus_one;;25;15;15;15,2;15;0,0
 12000319001;2,0;2;lead_time_percentile_n_plus_one;;3;3;3;3,8;3;0,0
 12000320001;1,0;1;lead_time_percentile_n_plus_one;;5;17;17;17,099999999999998;17;0,0
-12000350001;11,0;11;lead_time_percentile_n_plus_one;;9;13;13;13,299999999999999;13;0,0
 12000372001;2,0;2;lead_time_percentile_n_plus_one;;5;7;7;7,6;7;0,0
 12000374001;3,0;3;lead_time_percentile_n_plus_one;;4;9;9;9,5;9;0,0
 12000375001;2,0;2;lead_time_percentile_n_plus_one;;5;8;8;8,549999999999999;8;0,0
@@ -825,7 +806,6 @@
 12001047001;2,0;2;lead_time_percentile_n_plus_one;;2;11;11;11,399999999999999;11;0,0
 12001049001;6,0;6;lead_time_percentile_n_plus_one;;34;17;17;17,099999999999998;17;0,0
 12001051001;9,0;9;lead_time_percentile_n_plus_one;;6;10;10;10,45;10;0,0
-12001055001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12001064001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12001067001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12001070001;1,0;1;lead_time_percentile_n_plus_one;;3;3;3;3,8;3;0,0
@@ -837,7 +817,6 @@
 12002052001;2,0;2;lead_time_percentile_n_plus_one;;10;17;17;17,099999999999998;17;0,0
 12002062001;2,0;2;lead_time_percentile_n_plus_one;;4;5;5;5,699999999999999;5;0,0
 12002084001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-12002105001;1,0;1;lead_time_percentile_n_plus_one;;3;14;14;14,25;14;0,0
 12002106001;1,0;1;lead_time_percentile_n_plus_one;;4;12;12;12,35;12;0,0
 12002107001;2,0;2;lead_time_percentile_n_plus_one;;5;16;16;16,15;16;0,0
 12002114001;1,0;1;lead_time_percentile_n_plus_one;;6;13;13;13,299999999999999;13;0,0
@@ -849,12 +828,9 @@
 12003084001;2,0;2;lead_time_percentile_n_plus_one;;3;3;3;3,8;3;0,0
 12003113001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12003130001;2,0;2;lead_time_percentile_n_plus_one;;14;15;15;15,2;15;0,0
-12005015007;1,0;1;lead_time_percentile_n_plus_one;;2;9;9;9,5;9;0,0
 12005019002;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-12005056001;3,0;3;lead_time_percentile_n_plus_one;;2;5;5;5,699999999999999;5;0,0
 12005056002;2,0;2;lead_time_percentile_n_plus_one;;3;15;15;15,2;15;0,0
 12005082006;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-12005082007;2,0;2;lead_time_percentile_n_plus_one;;4;9;9;9,5;9;0,0
 12005084006;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12005093001;10,0;10;lead_time_percentile_n_plus_one;;14;15;15;15,2;15;0,0
 12005093002;1,0;1;lead_time_percentile_n_plus_one;;2;4;4;4,75;4;0,0
@@ -887,16 +863,12 @@
 12010071001;4,0;4;lead_time_percentile_n_plus_one;;7;4;4;4,75;4;0,0
 12010074001;5,0;5;lead_time_percentile_n_plus_one;;8;16;16;16,15;16;0,0
 12010084001;5,0;5;lead_time_percentile_n_plus_one;;13;14;14;14,25;14;0,0
-12010107001;6,0;6;lead_time_percentile_n_plus_one;;2;6;6;6,6499999999999995;6;0,0
 12010110001;10,0;10;lead_time_percentile_n_plus_one;;65;17;17;17,099999999999998;17;0,0
 12010113001;2,0;2;lead_time_percentile_n_plus_one;;8;16;16;16,15;16;0,0
 12010118001;2,0;2;lead_time_percentile_n_plus_one;;4;9;9;9,5;9;0,0
 12010123001;3,0;3;lead_time_percentile_n_plus_one;;3;10;10;10,45;10;0,0
 12010137001;16,0;16;lead_time_percentile_n_plus_one;;48;17;17;17,099999999999998;17;0,0
-12010149001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12010163001;4,0;4;lead_time_percentile_n_plus_one;;9;13;13;13,299999999999999;13;0,0
-12010173001;1,0;1;lead_time_percentile_n_plus_one;;5;8;8;8,549999999999999;8;0,0
-12010176001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12010193001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12010198001;4,0;4;lead_time_percentile_n_plus_one;;17;17;17;17,099999999999998;17;0,0
 12010200001;1,0;1;lead_time_percentile_n_plus_one;;2;8;8;8,549999999999999;8;0,0
@@ -918,9 +890,7 @@
 12011075001;10,0;10;lead_time_percentile_n_plus_one;;39;17;17;17,099999999999998;17;0,0
 12011084001;5,0;5;lead_time_percentile_n_plus_one;;11;15;15;15,2;15;0,0
 12011085001;9,0;9;lead_time_percentile_n_plus_one;;22;15;15;15,2;15;0,0
-12011088001;1,0;1;lead_time_percentile_n_plus_one;;2;7;7;7,6;7;0,0
 12011096001;6,0;6;lead_time_percentile_n_plus_one;;3;15;15;15,2;15;0,0
-12011100001;1,0;1;lead_time_percentile_n_plus_one;;3;3;3;3,8;3;0,0
 12011103001;2,0;2;lead_time_percentile_n_plus_one;;2;5;5;5,699999999999999;5;0,0
 12011109001;5,0;5;lead_time_percentile_n_plus_one;;20;16;16;16,15;16;0,0
 12011111001;1,0;1;lead_time_percentile_n_plus_one;;3;15;15;15,2;15;0,0
@@ -932,14 +902,12 @@
 12011136001;5,0;5;lead_time_percentile_n_plus_one;;15;15;15;15,2;15;0,0
 12011144001;6,0;6;lead_time_percentile_n_plus_one;;8;7;7;7,6;7;0,0
 12011150001;4,0;4;lead_time_percentile_n_plus_one;;10;15;15;15,2;15;0,0
-12011152001;1,0;1;lead_time_percentile_n_plus_one;;3;11;11;11,399999999999999;11;0,0
 12011159001;6,0;6;lead_time_percentile_n_plus_one;;19;15;15;15,2;15;0,0
 12011163001;10,0;10;lead_time_percentile_n_plus_one;;7;14;14;14,25;14;0,0
 12011168001;19,0;19;lead_time_percentile_n_plus_one;;34;13;13;13,299999999999999;13;0,0
 12011169001;8,0;8;lead_time_percentile_n_plus_one;;10;8;8;8,549999999999999;8;0,0
 12011171001;6,0;6;lead_time_percentile_n_plus_one;;4;12;12;12,35;12;0,0
 12011172001;6,0;6;lead_time_percentile_n_plus_one;;8;12;12;12,35;12;0,0
-12011174001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12011178001;1,0;1;lead_time_percentile_n_plus_one;;2;8;8;8,549999999999999;8;0,0
 12011179001;4,0;4;lead_time_percentile_n_plus_one;;3;11;11;11,399999999999999;11;0,0
 12011189001;6,0;6;lead_time_percentile_n_plus_one;;11;17;17;17,099999999999998;17;0,0
@@ -972,7 +940,6 @@
 12011333001;4,0;4;lead_time_percentile_n_plus_one;;19;17;17;17,099999999999998;17;0,0
 12011334001;6,0;6;lead_time_percentile_n_plus_one;;24;14;14;14,25;14;0,0
 12011337001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-12011338001;1,0;1;lead_time_percentile_n_plus_one;;3;6;6;6,6499999999999995;6;0,0
 12011339001;2,0;2;lead_time_percentile_n_plus_one;;2;1;1;1,9;1;0,0
 12011347001;6,0;6;lead_time_percentile_n_plus_one;;6;17;17;17,099999999999998;17;0,0
 12011349001;5,0;5;lead_time_percentile_n_plus_one;;11;15;15;15,2;15;0,0
@@ -985,10 +952,8 @@
 12011373001;1,0;1;lead_time_percentile_n_plus_one;;3;10;10;10,45;10;0,0
 12011374001;2,0;2;lead_time_percentile_n_plus_one;;7;9;9;9,5;9;0,0
 12011378001;2,0;2;lead_time_percentile_n_plus_one;;5;13;13;13,299999999999999;13;0,0
-12011386001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12011398001;2,0;2;lead_time_percentile_n_plus_one;;6;13;13;13,299999999999999;13;0,0
 12011400001;6,0;6;lead_time_percentile_n_plus_one;;19;17;17;17,099999999999998;17;0,0
-12011402001;1,0;1;lead_time_percentile_n_plus_one;;3;15;15;15,2;15;0,0
 12011403001;3,0;3;lead_time_percentile_n_plus_one;;6;9;9;9,5;9;0,0
 12011409001;6,0;6;lead_time_percentile_n_plus_one;;12;15;15;15,2;15;0,0
 12011439001;2,0;2;lead_time_percentile_n_plus_one;;4;8;8;8,549999999999999;8;0,0
@@ -1001,7 +966,6 @@
 12014032001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12014035001;2,0;2;lead_time_percentile_n_plus_one;;7;11;11;11,399999999999999;11;0,0
 12016042001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-12016106001;4,0;4;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12016114001;3,0;3;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12016139001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12017017001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
@@ -1013,10 +977,7 @@
 12020035001;2,0;2;lead_time_percentile_n_plus_one;;8;17;17;17,099999999999998;17;0,0
 12020036001;3,0;3;lead_time_percentile_n_plus_one;;12;14;14;14,25;14;0,0
 12020046001;1,0;1;lead_time_percentile_n_plus_one;;2;4;4;4,75;4;0,0
-12020051001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12020068001;4,0;4;lead_time_percentile_n_plus_one;;12;10;10;10,45;10;0,0
-12020078001;1,0;1;lead_time_percentile_n_plus_one;;3;12;12;12,35;12;0,0
-12020093001;2,0;2;lead_time_percentile_n_plus_one;;11;17;17;17,099999999999998;17;0,0
 12020141001;6,0;6;lead_time_percentile_n_plus_one;;8;15;15;15,2;15;0,0
 12020165001;4,0;4;lead_time_percentile_n_plus_one;;18;17;17;17,099999999999998;17;0,0
 12020175001;7,0;7;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
@@ -1029,14 +990,12 @@
 12020246001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12020249001;5,0;5;lead_time_percentile_n_plus_one;;2;14;14;14,25;14;0,0
 12020260001;1,0;1;lead_time_percentile_n_plus_one;;2;11;11;11,399999999999999;11;0,0
-12020271001;1,0;1;lead_time_percentile_n_plus_one;;2;15;15;15,2;15;0,0
 12020272001;2,0;2;lead_time_percentile_n_plus_one;;2;8;8;8,549999999999999;8;0,0
 12020324001;5,0;5;lead_time_percentile_n_plus_one;;5;9;9;9,5;9;0,0
 12020344001;11,0;11;lead_time_percentile_n_plus_one;;20;13;13;13,299999999999999;13;0,0
 12020437001;2,0;2;lead_time_percentile_n_plus_one;;3;3;3;3,8;3;0,0
 12020473001;4,0;4;lead_time_percentile_n_plus_one;;29;17;17;17,099999999999998;17;0,0
 12020485001;4,0;4;lead_time_percentile_n_plus_one;;21;17;17;17,099999999999998;17;0,0
-12020920001;4,0;4;lead_time_percentile_n_plus_one;;3;12;12;12,35;12;0,0
 12020923001;2,0;2;lead_time_percentile_n_plus_one;;3;14;14;14,25;14;0,0
 12020926001;10,0;10;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12020927001;2,0;2;lead_time_percentile_n_plus_one;;2;2;2;2,8499999999999996;2;0,0
@@ -1046,14 +1005,12 @@
 12022043001;2,0;2;lead_time_percentile_n_plus_one;;5;17;17;17,099999999999998;17;0,0
 12022153001;4,0;4;lead_time_percentile_n_plus_one;;2;1;1;1,9;1;0,0
 12023199001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-12023227001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12032121001;2,0;2;lead_time_percentile_n_plus_one;;2;4;4;4,75;4;0,0
 12032541001;2,0;2;lead_time_percentile_n_plus_one;;3;2;2;2,8499999999999996;2;0,0
 12034001001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12034051001;3,0;3;lead_time_percentile_n_plus_one;;3;3;3;3,8;3;0,0
 12034075001;15,0;15;lead_time_percentile_n_plus_one;;31;17;17;17,099999999999998;17;0,0
 12034085001;7,0;7;lead_time_percentile_n_plus_one;;2;2;2;2,8499999999999996;2;0,0
-12034100001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12034154001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12100002001;6,0;6;lead_time_percentile_n_plus_one;;8;6;6;6,6499999999999995;6;0,0
 12100009001;10,0;10;lead_time_percentile_n_plus_one;;2;4;4;4,75;4;0,0
@@ -1068,7 +1025,6 @@
 12100040001;10,0;10;lead_time_percentile_n_plus_one;;7;8;8;8,549999999999999;8;0,0
 12100046001;14,0;14;lead_time_percentile_n_plus_one;;13;8;8;8,549999999999999;8;0,0
 12100051001;3,0;3;lead_time_percentile_n_plus_one;;6;14;14;14,25;14;0,0
-12100069001;2,0;2;lead_time_percentile_n_plus_one;;6;14;14;14,25;14;0,0
 12100078001;3,0;3;lead_time_percentile_n_plus_one;;2;1;1;1,9;1;0,0
 12100091001;3,0;3;lead_time_percentile_n_plus_one;;4;4;4;4,75;4;0,0
 12100093001;1,0;1;lead_time_percentile_n_plus_one;;3;13;13;13,299999999999999;13;0,0
@@ -1082,7 +1038,6 @@
 12101033001;2,0;2;lead_time_percentile_n_plus_one;;5;15;15;15,2;15;0,0
 12102010001;2,0;2;lead_time_percentile_n_plus_one;;5;10;10;10,45;10;0,0
 12102013001;8,0;8;lead_time_percentile_n_plus_one;;12;15;15;15,2;15;0,0
-12102016001;6,0;6;lead_time_percentile_n_plus_one;;6;12;12;12,35;12;0,0
 12102024001;6,0;6;lead_time_percentile_n_plus_one;;3;13;13;13,299999999999999;13;0,0
 12102026001;3,0;3;lead_time_percentile_n_plus_one;;8;11;11;11,399999999999999;11;0,0
 12102027001;2,0;2;lead_time_percentile_n_plus_one;;4;15;15;15,2;15;0,0
@@ -1112,7 +1067,6 @@
 12103047001;3,0;3;lead_time_percentile_n_plus_one;;3;14;14;14,25;14;0,0
 12103060001;15,0;15;lead_time_percentile_n_plus_one;;9;11;11;11,399999999999999;11;0,0
 12103080001;6,0;6;lead_time_percentile_n_plus_one;;3;3;3;3,8;3;0,0
-12103089001;3,0;3;lead_time_percentile_n_plus_one;;5;5;5;5,699999999999999;5;0,0
 12103101001;3,0;3;lead_time_percentile_n_plus_one;;8;13;13;13,299999999999999;13;0,0
 12103125001;3,0;3;lead_time_percentile_n_plus_one;;10;12;12;12,35;12;0,0
 12103144001;6,0;6;lead_time_percentile_n_plus_one;;7;13;13;13,299999999999999;13;0,0
@@ -1154,7 +1108,6 @@
 12106064001;3,0;3;lead_time_percentile_n_plus_one;;8;11;11;11,399999999999999;11;0,0
 12106067001;4,0;4;lead_time_percentile_n_plus_one;;5;10;10;10,45;10;0,0
 12106070001;1,0;1;lead_time_percentile_n_plus_one;;2;5;5;5,699999999999999;5;0,0
-12106073001;1,0;1;lead_time_percentile_n_plus_one;;3;14;14;14,25;14;0,0
 12106086001;4,0;4;lead_time_percentile_n_plus_one;;6;13;13;13,299999999999999;13;0,0
 12106087001;2,0;2;lead_time_percentile_n_plus_one;;4;14;14;14,25;14;0,0
 12106097001;5,0;5;lead_time_percentile_n_plus_one;;23;17;17;17,099999999999998;17;0,0
@@ -1181,7 +1134,6 @@
 12120052001;42,0;42;lead_time_percentile_n_plus_one;;55;17;17;17,099999999999998;17;0,0
 12120053001;14,0;14;lead_time_percentile_n_plus_one;;23;12;12;12,35;12;0,0
 12120072001;4,0;4;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-12120085001;1,0;1;lead_time_percentile_n_plus_one;;2;5;5;5,699999999999999;5;0,0
 12120086001;10,0;10;lead_time_percentile_n_plus_one;;4;15;15;15,2;15;0,0
 12120898001;16,0;16;lead_time_percentile_n_plus_one;;16;17;17;17,099999999999998;17;0,0
 12121004001;36,0;36;lead_time_percentile_n_plus_one;;49;17;17;17,099999999999998;17;0,0
@@ -1198,13 +1150,11 @@
 12121078001;3,0;3;lead_time_percentile_n_plus_one;;3;5;5;5,699999999999999;5;0,0
 12121087001;4,0;4;lead_time_percentile_n_plus_one;;2;1;1;1,9;1;0,0
 12121091001;8,0;8;lead_time_percentile_n_plus_one;;15;15;15;15,2;15;0,0
-12121103001;3,0;3;lead_time_percentile_n_plus_one;;4;15;15;15,2;15;0,0
 12122002002;27,0;27;lead_time_percentile_n_plus_one;;12;10;10;10,45;10;0,0
 12122005001;4,0;4;lead_time_percentile_n_plus_one;;5;16;16;16,15;16;0,0
 12122007001;12,0;12;lead_time_percentile_n_plus_one;;14;17;17;17,099999999999998;17;0,0
 12122012001;24,0;24;lead_time_percentile_n_plus_one;;4;7;7;7,6;7;0,0
 12122014001;10,0;10;lead_time_percentile_n_plus_one;;7;11;11;11,399999999999999;11;0,0
-12122015001;4,0;4;lead_time_percentile_n_plus_one;;3;9;9;9,5;9;0,0
 12122016001;12,0;12;lead_time_percentile_n_plus_one;;20;17;17;17,099999999999998;17;0,0
 12122021001;15,0;15;lead_time_percentile_n_plus_one;;9;17;17;17,099999999999998;17;0,0
 12122023002;12,0;12;lead_time_percentile_n_plus_one;;4;11;11;11,399999999999999;11;0,0
@@ -1274,7 +1224,6 @@
 12151088001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 12151089001;1,0;1;lead_time_percentile_n_plus_one;;2;4;4;4,75;4;0,0
 12151096001;4,0;4;lead_time_percentile_n_plus_one;;7;9;9;9,5;9;0,0
-12152004001;1,0;1;lead_time_percentile_n_plus_one;;3;13;13;13,299999999999999;13;0,0
 12201064001;120,0;120;lead_time_percentile_n_plus_one;;10;16;16;16,15;16;0,0
 12201067001;150,0;150;lead_time_percentile_n_plus_one;;20;16;16;16,15;16;0,0
 12201080001;15,0;15;lead_time_percentile_n_plus_one;;38;17;17;17,099999999999998;17;0,0
@@ -1294,7 +1243,6 @@
 12212030001;24,0;24;lead_time_percentile_n_plus_one;;3;13;13;13,299999999999999;13;0,0
 12212033001;25,0;25;lead_time_percentile_n_plus_one;;116;17;17;17,099999999999998;17;0,0
 12212035001;6,0;6;lead_time_percentile_n_plus_one;;32;17;17;17,099999999999998;17;0,0
-12212037001;6,0;6;lead_time_percentile_n_plus_one;;5;15;15;15,2;15;0,0
 12212040001;3,0;3;lead_time_percentile_n_plus_one;;8;15;15;15,2;15;0,0
 12212056001;3,0;3;lead_time_percentile_n_plus_one;;9;13;13;13,299999999999999;13;0,0
 12212057001;2,0;2;lead_time_percentile_n_plus_one;;6;13;13;13,299999999999999;13;0,0
@@ -1307,14 +1255,11 @@
 12233023001;21,0;21;lead_time_percentile_n_plus_one;;23;14;14;14,25;14;0,0
 12234029001;12,0;12;lead_time_percentile_n_plus_one;;29;16;16;16,15;16;0,0
 12234038001;1,0;1;lead_time_percentile_n_plus_one;;2;4;4;4,75;4;0,0
-12234901001;5,0;5;lead_time_percentile_n_plus_one;;2;1;1;1,9;1;0,0
-12234915001;1,0;1;lead_time_percentile_n_plus_one;;2;5;5;5,699999999999999;5;0,0
 12301001001;6,0;6;lead_time_percentile_n_plus_one;;21;15;15;15,2;15;0,0
 12301004001;3,0;3;lead_time_percentile_n_plus_one;;7;13;13;13,299999999999999;13;0,0
 12301010001;3,0;3;lead_time_percentile_n_plus_one;;8;14;14;14,25;14;0,0
 12301011001;8,0;8;lead_time_percentile_n_plus_one;;52;17;17;17,099999999999998;17;0,0
 12301023001;18,0;18;lead_time_percentile_n_plus_one;;7;10;10;10,45;10;0,0
-12301027001;12,0;12;lead_time_percentile_n_plus_one;;7;9;9;9,5;9;0,0
 12321040001;4,0;4;lead_time_percentile_n_plus_one;;3;4;4;4,75;4;0,0
 12322054001;6,0;6;lead_time_percentile_n_plus_one;;10;9;9;9,5;9;0,0
 12323109001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
@@ -1339,7 +1284,6 @@
 14000014001;26,0;26;lead_time_percentile_n_plus_one;;116;17;17;17,099999999999998;17;0,0
 14000015001;8,0;8;lead_time_percentile_n_plus_one;;26;17;17;17,099999999999998;17;0,0
 14000018001;10,0;10;lead_time_percentile_n_plus_one;;42;17;17;17,099999999999998;17;0,0
-14000020001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 14000021001;11,0;11;lead_time_percentile_n_plus_one;;48;17;17;17,099999999999998;17;0,0
 14000022001;27,0;27;lead_time_percentile_n_plus_one;;160;17;17;17,099999999999998;17;0,0
 14000023001;1,0;1;lead_time_percentile_n_plus_one;;2;17;17;17,099999999999998;17;0,0
@@ -1475,7 +1419,6 @@
 14010283001;2,0;2;lead_time_percentile_n_plus_one;;4;15;15;15,2;15;0,0
 14010284001;3,0;3;lead_time_percentile_n_plus_one;;7;13;13;13,299999999999999;13;0,0
 14010285001;4,0;4;lead_time_percentile_n_plus_one;;14;17;17;17,099999999999998;17;0,0
-14010897001;1,0;1;lead_time_percentile_n_plus_one;;2;5;5;5,699999999999999;5;0,0
 14010898001;1,0;1;lead_time_percentile_n_plus_one;;3;13;13;13,299999999999999;13;0,0
 14011003001;143,0;143;lead_time_percentile_n_plus_one;;515;17;17;17,099999999999998;17;0,0
 14011004001;9,0;9;lead_time_percentile_n_plus_one;;33;17;17;17,099999999999998;17;0,0
@@ -1650,7 +1593,6 @@
 14110029001;22,0;22;lead_time_percentile_n_plus_one;;119;17;17;17,099999999999998;17;0,0
 14110054001;27,0;27;lead_time_percentile_n_plus_one;;191;17;17;17,099999999999998;17;0,0
 14110056001;12,0;12;lead_time_percentile_n_plus_one;;39;17;17;17,099999999999998;17;0,0
-14110078001;2,0;2;lead_time_percentile_n_plus_one;;11;16;16;16,15;16;0,0
 14110081001;22,0;22;lead_time_percentile_n_plus_one;;84;17;17;17,099999999999998;17;0,0
 14110084001;30,0;30;lead_time_percentile_n_plus_one;;174;17;17;17,099999999999998;17;0,0
 14110086001;10,0;10;lead_time_percentile_n_plus_one;;76;17;17;17,099999999999998;17;0,0
@@ -1685,7 +1627,6 @@
 14111055001;4,0;4;lead_time_percentile_n_plus_one;;26;14;14;14,25;14;0,0
 14111090001;2,0;2;lead_time_percentile_n_plus_one;;6;12;12;12,35;12;0,0
 14111098001;2,0;2;lead_time_percentile_n_plus_one;;8;14;14;14,25;14;0,0
-14111102001;3,0;3;lead_time_percentile_n_plus_one;;9;15;15;15,2;15;0,0
 14111107001;1,0;1;lead_time_percentile_n_plus_one;;3;13;13;13,299999999999999;13;0,0
 14111118001;22,0;22;lead_time_percentile_n_plus_one;;110;17;17;17,099999999999998;17;0,0
 14111119001;2,0;2;lead_time_percentile_n_plus_one;;2;6;6;6,6499999999999995;6;0,0
@@ -1855,7 +1796,6 @@
 14204892001;26,0;26;lead_time_percentile_n_plus_one;;109;17;17;17,099999999999998;17;0,0
 14210009001;3,0;3;lead_time_percentile_n_plus_one;;9;13;13;13,299999999999999;13;0,0
 14210010001;4,0;4;lead_time_percentile_n_plus_one;;14;17;17;17,099999999999998;17;0,0
-14210019001;1,0;1;lead_time_percentile_n_plus_one;;3;8;8;8,549999999999999;8;0,0
 14210021001;4,0;4;lead_time_percentile_n_plus_one;;9;17;17;17,099999999999998;17;0,0
 14210026001;2,0;2;lead_time_percentile_n_plus_one;;4;11;11;11,399999999999999;11;0,0
 14210029001;1,0;1;lead_time_percentile_n_plus_one;;4;14;14;14,25;14;0,0
@@ -1863,7 +1803,6 @@
 14210035001;2,0;2;lead_time_percentile_n_plus_one;;13;13;13;13,299999999999999;13;0,0
 14210045001;1,0;1;lead_time_percentile_n_plus_one;;3;6;6;6,6499999999999995;6;0,0
 14210046001;4,0;4;lead_time_percentile_n_plus_one;;15;17;17;17,099999999999998;17;0,0
-14210047001;1,0;1;lead_time_percentile_n_plus_one;;2;2;2;2,8499999999999996;2;0,0
 14210048001;3,0;3;lead_time_percentile_n_plus_one;;6;13;13;13,299999999999999;13;0,0
 14210051001;12,0;12;lead_time_percentile_n_plus_one;;24;14;14;14,25;14;0,0
 14210056001;2,0;2;lead_time_percentile_n_plus_one;;8;9;9;9,5;9;0,0
@@ -1871,7 +1810,6 @@
 14210084001;3,0;3;lead_time_percentile_n_plus_one;;3;13;13;13,299999999999999;13;0,0
 14210108001;8,0;8;lead_time_percentile_n_plus_one;;10;8;8;8,549999999999999;8;0,0
 14210110001;3,0;3;lead_time_percentile_n_plus_one;;11;15;15;15,2;15;0,0
-14210114001;1,0;1;lead_time_percentile_n_plus_one;;4;12;12;12,35;12;0,0
 14210127001;5,0;5;lead_time_percentile_n_plus_one;;4;14;14;14,25;14;0,0
 14211055001;4,0;4;lead_time_percentile_n_plus_one;;21;17;17;17,099999999999998;17;0,0
 14213004001;5,0;5;lead_time_percentile_n_plus_one;;30;17;17;17,099999999999998;17;0,0
@@ -1893,7 +1831,6 @@
 14222043001;10,0;10;lead_time_percentile_n_plus_one;;54;17;17;17,099999999999998;17;0,0
 14222046001;11,0;11;lead_time_percentile_n_plus_one;;62;17;17;17,099999999999998;17;0,0
 14222048001;12,0;12;lead_time_percentile_n_plus_one;;6;10;10;10,45;10;0,0
-14222049001;2,0;2;lead_time_percentile_n_plus_one;;7;12;12;12,35;12;0,0
 14222053001;8,0;8;lead_time_percentile_n_plus_one;;20;15;15;15,2;15;0,0
 14222068001;14,0;14;lead_time_percentile_n_plus_one;;101;17;17;17,099999999999998;17;0,0
 14222072001;14,0;14;lead_time_percentile_n_plus_one;;91;17;17;17,099999999999998;17;0,0
@@ -1947,9 +1884,7 @@
 14226035001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 14226042001;2,0;2;lead_time_percentile_n_plus_one;;9;16;16;16,15;16;0,0
 14226046001;2,0;2;lead_time_percentile_n_plus_one;;4;9;9;9,5;9;0,0
-14226059001;3,0;3;lead_time_percentile_n_plus_one;;11;16;16;16,15;16;0,0
 14226067001;3,0;3;lead_time_percentile_n_plus_one;;7;13;13;13,299999999999999;13;0,0
-14226100001;3,0;3;lead_time_percentile_n_plus_one;;3;5;5;5,699999999999999;5;0,0
 14227002001;4,0;4;lead_time_percentile_n_plus_one;;12;15;15;15,2;15;0,0
 14227005001;4,0;4;lead_time_percentile_n_plus_one;;18;15;15;15,2;15;0,0
 14230034001;13,0;13;lead_time_percentile_n_plus_one;;55;17;17;17,099999999999998;17;0,0
@@ -2008,7 +1943,6 @@
 14243106001;1,0;1;lead_time_percentile_n_plus_one;;3;13;13;13,299999999999999;13;0,0
 14243107001;4,0;4;lead_time_percentile_n_plus_one;;16;17;17;17,099999999999998;17;0,0
 14243108001;1,0;1;lead_time_percentile_n_plus_one;;7;14;14;14,25;14;0,0
-14243110001;2,0;2;lead_time_percentile_n_plus_one;;2;4;4;4,75;4;0,0
 14243129001;19,0;19;lead_time_percentile_n_plus_one;;29;17;17;17,099999999999998;17;0,0
 14243166001;7,0;7;lead_time_percentile_n_plus_one;;26;17;17;17,099999999999998;17;0,0
 14244003001;49,0;49;lead_time_percentile_n_plus_one;;240;17;17;17,099999999999998;17;0,0
@@ -2059,7 +1993,6 @@
 14302006001;12,0;12;lead_time_percentile_n_plus_one;;12;15;15;15,2;15;0,0
 14302017001;4,0;4;lead_time_percentile_n_plus_one;;12;6;6;6,6499999999999995;6;0,0
 14302018001;10,0;10;lead_time_percentile_n_plus_one;;7;13;13;13,299999999999999;13;0,0
-14302060001;1,0;1;lead_time_percentile_n_plus_one;;3;7;7;7,6;7;0,0
 14302079001;6,0;6;lead_time_percentile_n_plus_one;;16;14;14;14,25;14;0,0
 14302080001;2,0;2;lead_time_percentile_n_plus_one;;12;17;17;17,099999999999998;17;0,0
 14303015001;4,0;4;lead_time_percentile_n_plus_one;;21;17;17;17,099999999999998;17;0,0
@@ -2151,19 +2084,16 @@
 14331022001;4,0;4;lead_time_percentile_n_plus_one;;18;16;16;16,15;16;0,0
 14331026001;3,0;3;lead_time_percentile_n_plus_one;;11;13;13;13,299999999999999;13;0,0
 14331028001;8,0;8;lead_time_percentile_n_plus_one;;32;17;17;17,099999999999998;17;0,0
-14331029001;2,0;2;lead_time_percentile_n_plus_one;;4;13;13;13,299999999999999;13;0,0
 14331037001;2,0;2;lead_time_percentile_n_plus_one;;10;14;14;14,25;14;0,0
 14331039001;2,0;2;lead_time_percentile_n_plus_one;;9;17;17;17,099999999999998;17;0,0
 14331044001;4,0;4;lead_time_percentile_n_plus_one;;18;16;16;16,15;16;0,0
 14331898001;2,0;2;lead_time_percentile_n_plus_one;;3;8;8;8,549999999999999;8;0,0
 14331997001;3,0;3;lead_time_percentile_n_plus_one;;5;11;11;11,399999999999999;11;0,0
-14332005001;1,0;1;lead_time_percentile_n_plus_one;;2;6;6;6,6499999999999995;6;0,0
 14332007001;4,0;4;lead_time_percentile_n_plus_one;;7;12;12;12,35;12;0,0
 14332008001;10,0;10;lead_time_percentile_n_plus_one;;22;16;16;16,15;16;0,0
 14332013001;3,0;3;lead_time_percentile_n_plus_one;;9;9;9;9,5;9;0,0
 14332014001;7,0;7;lead_time_percentile_n_plus_one;;19;17;17;17,099999999999998;17;0,0
 14332016001;5,0;5;lead_time_percentile_n_plus_one;;21;14;14;14,25;14;0,0
-14332017001;1,0;1;lead_time_percentile_n_plus_one;;2;3;3;3,8;3;0,0
 14333006001;5,0;5;lead_time_percentile_n_plus_one;;7;9;9;9,5;9;0,0
 14340006001;5,0;5;lead_time_percentile_n_plus_one;;26;16;16;16,15;16;0,0
 14340026001;2,0;2;lead_time_percentile_n_plus_one;;2;2;2;2,8499999999999996;2;0,0
@@ -2185,7 +2115,6 @@
 14351038001;2,0;2;lead_time_percentile_n_plus_one;;9;11;11;11,399999999999999;11;0,0
 14351041001;3,0;3;lead_time_percentile_n_plus_one;;8;14;14;14,25;14;0,0
 14351042001;6,0;6;lead_time_percentile_n_plus_one;;17;17;17;17,099999999999998;17;0,0
-14351059001;1,0;1;lead_time_percentile_n_plus_one;;3;11;11;11,399999999999999;11;0,0
 14351068001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 14352028001;4,0;4;lead_time_percentile_n_plus_one;;6;8;8;8,549999999999999;8;0,0
 14352058001;4,0;4;lead_time_percentile_n_plus_one;;6;6;6;6,6499999999999995;6;0,0
@@ -2231,11 +2160,9 @@
 14361055001;6,0;6;lead_time_percentile_n_plus_one;;12;14;14;14,25;14;0,0
 14361061001;12,0;12;lead_time_percentile_n_plus_one;;10;15;15;15,2;15;0,0
 14361065001;6,0;6;lead_time_percentile_n_plus_one;;20;17;17;17,099999999999998;17;0,0
-14361070001;2,0;2;lead_time_percentile_n_plus_one;;4;11;11;11,399999999999999;11;0,0
 14361081001;3,0;3;lead_time_percentile_n_plus_one;;6;13;13;13,299999999999999;13;0,0
 14361082001;7,0;7;lead_time_percentile_n_plus_one;;25;17;17;17,099999999999998;17;0,0
 14361083001;8,0;8;lead_time_percentile_n_plus_one;;10;16;16;16,15;16;0,0
-14361086001;4,0;4;lead_time_percentile_n_plus_one;;11;16;16;16,15;16;0,0
 14361093001;5,0;5;lead_time_percentile_n_plus_one;;9;17;17;17,099999999999998;17;0,0
 14361102001;3,0;3;lead_time_percentile_n_plus_one;;5;12;12;12,35;12;0,0
 14361104001;6,0;6;lead_time_percentile_n_plus_one;;21;17;17;17,099999999999998;17;0,0
@@ -2248,7 +2175,6 @@
 14361128001;6,0;6;lead_time_percentile_n_plus_one;;19;14;14;14,25;14;0,0
 14361129001;8,0;8;lead_time_percentile_n_plus_one;;37;17;17;17,099999999999998;17;0,0
 14361146001;5,0;5;lead_time_percentile_n_plus_one;;11;10;10;10,45;10;0,0
-14361149001;6,0;6;lead_time_percentile_n_plus_one;;10;16;16;16,15;16;0,0
 14361158001;3,0;3;lead_time_percentile_n_plus_one;;9;13;13;13,299999999999999;13;0,0
 14361159001;8,0;8;lead_time_percentile_n_plus_one;;15;17;17;17,099999999999998;17;0,0
 14361160001;5,0;5;lead_time_percentile_n_plus_one;;21;17;17;17,099999999999998;17;0,0
@@ -2265,12 +2191,10 @@
 14370020001;47,0;47;lead_time_percentile_n_plus_one;;199;17;17;17,099999999999998;17;0,0
 14370025001;5,0;5;lead_time_percentile_n_plus_one;;21;17;17;17,099999999999998;17;0,0
 14370029001;8,0;8;lead_time_percentile_n_plus_one;;16;12;12;12,35;12;0,0
-14370044001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 14370045001;3,0;3;lead_time_percentile_n_plus_one;;9;15;15;15,2;15;0,0
 14370048001;3,0;3;lead_time_percentile_n_plus_one;;6;9;9;9,5;9;0,0
 14370072001;4,0;4;lead_time_percentile_n_plus_one;;17;17;17;17,099999999999998;17;0,0
 14370076001;12,0;12;lead_time_percentile_n_plus_one;;16;17;17;17,099999999999998;17;0,0
-14370077001;2,0;2;lead_time_percentile_n_plus_one;;5;17;17;17,099999999999998;17;0,0
 14411001001;3,0;3;lead_time_percentile_n_plus_one;;6;14;14;14,25;14;0,0
 14412037001;6,0;6;lead_time_percentile_n_plus_one;;2;10;10;10,45;10;0,0
 14500000001;450,0;450;lead_time_percentile_n_plus_one;;734;17;17;17,099999999999998;17;0,0
@@ -2490,12 +2414,10 @@
 14510014001;6,0;6;lead_time_percentile_n_plus_one;;6;10;10;10,45;10;0,0
 14511005001;6,0;6;lead_time_percentile_n_plus_one;;10;9;9;9,5;9;0,0
 14512015001;2,0;2;lead_time_percentile_n_plus_one;;7;15;15;15,2;15;0,0
-14512916001;3,0;3;lead_time_percentile_n_plus_one;;11;16;16;16,15;16;0,0
 14520044001;2,0;2;lead_time_percentile_n_plus_one;;5;16;16;16,15;16;0,0
 14520065001;62,0;62;lead_time_percentile_n_plus_one;;184;17;17;17,099999999999998;17;0,0
 14520067001;16,0;16;lead_time_percentile_n_plus_one;;40;17;17;17,099999999999998;17;0,0
 14520068001;30,0;30;lead_time_percentile_n_plus_one;;96;17;17;17,099999999999998;17;0,0
-14521148001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 14521156001;20,0;20;lead_time_percentile_n_plus_one;;52;17;17;17,099999999999998;17;0,0
 14521157001;74,0;74;lead_time_percentile_n_plus_one;;212;17;17;17,099999999999998;17;0,0
 14521158001;40,0;40;lead_time_percentile_n_plus_one;;125;17;17;17,099999999999998;17;0,0
@@ -2541,9 +2463,6 @@
 14602060001;3,0;3;lead_time_percentile_n_plus_one;;8;10;10;10,45;10;0,0
 14602063001;3,0;3;lead_time_percentile_n_plus_one;;8;12;12;12,35;12;0,0
 14602089001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-14602091001;1,0;1;lead_time_percentile_n_plus_one;;2;3;3;3,8;3;0,0
-14602092001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-14602112001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 14602113001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 14603003001;16,0;16;lead_time_percentile_n_plus_one;;68;17;17;17,099999999999998;17;0,0
 14603004001;7,0;7;lead_time_percentile_n_plus_one;;30;17;17;17,099999999999998;17;0,0
@@ -2554,7 +2473,6 @@
 14603026001;1,0;1;lead_time_percentile_n_plus_one;;4;12;12;12,35;12;0,0
 14603030001;3,0;3;lead_time_percentile_n_plus_one;;4;4;4;4,75;4;0,0
 14603038001;5,0;5;lead_time_percentile_n_plus_one;;10;12;12;12,35;12;0,0
-14604042001;1,0;1;lead_time_percentile_n_plus_one;;3;11;11;11,399999999999999;11;0,0
 14610001001;5,0;5;lead_time_percentile_n_plus_one;;21;14;14;14,25;14;0,0
 14610002001;20,0;20;lead_time_percentile_n_plus_one;;158;17;17;17,099999999999998;17;0,0
 14610008001;19,0;19;lead_time_percentile_n_plus_one;;25;9;9;9,5;9;0,0
@@ -2596,7 +2514,6 @@
 14615012001;4,0;4;lead_time_percentile_n_plus_one;;5;17;17;17,099999999999998;17;0,0
 14615013001;3,0;3;lead_time_percentile_n_plus_one;;11;9;9;9,5;9;0,0
 14615019001;2,0;2;lead_time_percentile_n_plus_one;;8;15;15;15,2;15;0,0
-14615030001;3,0;3;lead_time_percentile_n_plus_one;;8;17;17;17,099999999999998;17;0,0
 14615031001;3,0;3;lead_time_percentile_n_plus_one;;3;3;3;3,8;3;0,0
 14615038001;8,0;8;lead_time_percentile_n_plus_one;;32;10;10;10,45;10;0,0
 14615041001;7,0;7;lead_time_percentile_n_plus_one;;23;17;17;17,099999999999998;17;0,0
@@ -2608,7 +2525,6 @@
 14615070001;78,0;78;lead_time_percentile_n_plus_one;;63;7;7;7,6;7;0,0
 14615072001;4,0;4;lead_time_percentile_n_plus_one;;5;11;11;11,399999999999999;11;0,0
 14615082001;21,0;21;lead_time_percentile_n_plus_one;;39;17;17;17,099999999999998;17;0,0
-14615083001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 14615084001;15,0;15;lead_time_percentile_n_plus_one;;109;17;17;17,099999999999998;17;0,0
 14615107001;3,0;3;lead_time_percentile_n_plus_one;;17;17;17;17,099999999999998;17;0,0
 14615108001;6,0;6;lead_time_percentile_n_plus_one;;29;15;15;15,2;15;0,0
@@ -2641,13 +2557,11 @@
 14620036001;2,0;2;lead_time_percentile_n_plus_one;;4;14;14;14,25;14;0,0
 14620039001;4,0;4;lead_time_percentile_n_plus_one;;4;3;3;3,8;3;0,0
 14620042001;43,0;43;lead_time_percentile_n_plus_one;;41;17;17;17,099999999999998;17;0,0
-14620046001;2,0;2;lead_time_percentile_n_plus_one;;2;8;8;8,549999999999999;8;0,0
 14620051001;6,0;6;lead_time_percentile_n_plus_one;;21;16;16;16,15;16;0,0
 14620057001;17,0;17;lead_time_percentile_n_plus_one;;42;15;15;15,2;15;0,0
 14620060001;6,0;6;lead_time_percentile_n_plus_one;;3;2;2;2,8499999999999996;2;0,0
 14620062001;14,0;14;lead_time_percentile_n_plus_one;;67;17;17;17,099999999999998;17;0,0
 14620070001;6,0;6;lead_time_percentile_n_plus_one;;11;16;16;16,15;16;0,0
-14620072001;2,0;2;lead_time_percentile_n_plus_one;;3;6;6;6,6499999999999995;6;0,0
 14620083001;3,0;3;lead_time_percentile_n_plus_one;;6;14;14;14,25;14;0,0
 14620084001;15,0;15;lead_time_percentile_n_plus_one;;22;16;16;16,15;16;0,0
 14620092001;8,0;8;lead_time_percentile_n_plus_one;;10;14;14;14,25;14;0,0
@@ -2688,7 +2602,6 @@
 14631043001;1,0;1;lead_time_percentile_n_plus_one;;3;17;17;17,099999999999998;17;0,0
 14631047001;4,0;4;lead_time_percentile_n_plus_one;;9;14;14;14,25;14;0,0
 14631064001;4,0;4;lead_time_percentile_n_plus_one;;13;14;14;14,25;14;0,0
-14631082001;1,0;1;lead_time_percentile_n_plus_one;;2;10;10;10,45;10;0,0
 14631944001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 14631948001;3,0;3;lead_time_percentile_n_plus_one;;7;17;17;17,099999999999998;17;0,0
 14632005001;4,0;4;lead_time_percentile_n_plus_one;;19;16;16;16,15;16;0,0
@@ -2711,7 +2624,6 @@
 14633936001;2,0;2;lead_time_percentile_n_plus_one;;11;17;17;17,099999999999998;17;0,0
 14633937001;6,0;6;lead_time_percentile_n_plus_one;;9;16;16;16,15;16;0,0
 14633938001;5,0;5;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-14634027001;3,0;3;lead_time_percentile_n_plus_one;;11;12;12;12,35;12;0,0
 14634047001;2,0;2;lead_time_percentile_n_plus_one;;4;4;4;4,75;4;0,0
 14700007001;6,0;6;lead_time_percentile_n_plus_one;;9;13;13;13,299999999999999;13;0,0
 14700026001;9,0;9;lead_time_percentile_n_plus_one;;35;17;17;17,099999999999998;17;0,0
@@ -2719,8 +2631,6 @@
 14700036001;3,0;3;lead_time_percentile_n_plus_one;;3;7;7;7,6;7;0,0
 14700037001;2,0;2;lead_time_percentile_n_plus_one;;4;14;14;14,25;14;0,0
 14700078001;7,0;7;lead_time_percentile_n_plus_one;;20;17;17;17,099999999999998;17;0,0
-14701008002;3,0;3;lead_time_percentile_n_plus_one;;10;17;17;17,099999999999998;17;0,0
-14701045001;1,0;1;lead_time_percentile_n_plus_one;;2;3;3;3,8;3;0,0
 14711001001;1,0;1;lead_time_percentile_n_plus_one;;2;14;14;14,25;14;0,0
 14711014001;4,0;4;lead_time_percentile_n_plus_one;;11;15;15;15,2;15;0,0
 14720022001;8,0;8;lead_time_percentile_n_plus_one;;5;13;13;13,299999999999999;13;0,0
@@ -2814,7 +2724,6 @@
 14822021001;4,0;4;lead_time_percentile_n_plus_one;;5;17;17;17,099999999999998;17;0,0
 14822025001;6,0;6;lead_time_percentile_n_plus_one;;11;11;11;11,399999999999999;11;0,0
 14822026001;12,0;12;lead_time_percentile_n_plus_one;;10;10;10;10,45;10;0,0
-14822044001;1,0;1;lead_time_percentile_n_plus_one;;4;17;17;17,099999999999998;17;0,0
 14822046001;33,0;33;lead_time_percentile_n_plus_one;;46;17;17;17,099999999999998;17;0,0
 14822049001;9,0;9;lead_time_percentile_n_plus_one;;32;17;17;17,099999999999998;17;0,0
 14822050001;4,0;4;lead_time_percentile_n_plus_one;;12;14;14;14,25;14;0,0
@@ -2921,11 +2830,9 @@
 14852044001;229,0;229;lead_time_percentile_n_plus_one;;49;3;3;3,8;3;0,0
 14852064001;9,0;9;lead_time_percentile_n_plus_one;;4;14;14;14,25;14;0,0
 14853003001;96,0;96;lead_time_percentile_n_plus_one;;10;12;12;12,35;12;0,0
-14853031001;2,0;2;lead_time_percentile_n_plus_one;;3;4;4;4,75;4;0,0
 14853046001;24,0;24;lead_time_percentile_n_plus_one;;5;13;13;13,299999999999999;13;0,0
 14853048001;24,0;24;lead_time_percentile_n_plus_one;;2;7;7;7,6;7;0,0
 15020001001;102,0;102;lead_time_percentile_n_plus_one;;35;17;17;17,099999999999998;17;0,0
-15020007001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 15020010001;816,0;816;lead_time_percentile_n_plus_one;;128;17;17;17,099999999999998;17;0,0
 15020046001;600,0;600;lead_time_percentile_n_plus_one;;74;17;17;17,099999999999998;17;0,0
 15020047001;1422,0;1422;lead_time_percentile_n_plus_one;;413;17;17;17,099999999999998;17;0,0
@@ -2945,7 +2852,6 @@
 15022009001;60,0;60;lead_time_percentile_n_plus_one;;36;16;16;16,15;16;0,0
 15022013001;102,0;102;lead_time_percentile_n_plus_one;;45;17;17;17,099999999999998;17;0,0
 15022017001;144,0;144;lead_time_percentile_n_plus_one;;43;15;15;15,2;15;0,0
-15022019001;6,0;6;lead_time_percentile_n_plus_one;;5;12;12;12,35;12;0,0
 15022021001;30,0;30;lead_time_percentile_n_plus_one;;15;13;13;13,299999999999999;13;0,0
 15022026001;414,0;414;lead_time_percentile_n_plus_one;;107;17;17;17,099999999999998;17;0,0
 15023001001;120,0;120;lead_time_percentile_n_plus_one;;3;1;1;1,9;1;0,0
@@ -2998,7 +2904,6 @@
 31421038001;3,0;3;lead_time_percentile_n_plus_one;;9;15;15;15,2;15;0,0
 31421039001;8,0;8;lead_time_percentile_n_plus_one;;5;12;12;12,35;12;0,0
 31421040001;2,0;2;lead_time_percentile_n_plus_one;;4;12;12;12,35;12;0,0
-31421041001;6,0;6;lead_time_percentile_n_plus_one;;3;10;10;10,45;10;0,0
 31422002001;4,0;4;lead_time_percentile_n_plus_one;;7;14;14;14,25;14;0,0
 31422011001;8,0;8;lead_time_percentile_n_plus_one;;14;14;14;14,25;14;0,0
 31422014001;2,0;2;lead_time_percentile_n_plus_one;;6;12;12;12,35;12;0,0
@@ -3014,7 +2919,6 @@
 31466156001;10,0;10;lead_time_percentile_n_plus_one;;37;17;17;17,099999999999998;17;0,0
 31473013001;20,0;20;lead_time_percentile_n_plus_one;;60;17;17;17,099999999999998;17;0,0
 31500006001;33,0;33;lead_time_percentile_n_plus_one;;68;17;17;17,099999999999998;17;0,0
-31500008001;1,0;1;lead_time_percentile_n_plus_one;;2;9;9;9,5;9;0,0
 31500014001;12,0;12;lead_time_percentile_n_plus_one;;21;15;15;15,2;15;0,0
 31500015001;18,0;18;lead_time_percentile_n_plus_one;;29;12;12;12,35;12;0,0
 31500022004;5,0;5;lead_time_percentile_n_plus_one;;19;14;14;14,25;14;0,0
@@ -3036,7 +2940,6 @@
 31502032004;4,0;4;lead_time_percentile_n_plus_one;;7;17;17;17,099999999999998;17;0,0
 31502034001;8,0;8;lead_time_percentile_n_plus_one;;17;17;17;17,099999999999998;17;0,0
 31530003001;3,0;3;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-31530005001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 31530008001;3,0;3;lead_time_percentile_n_plus_one;;3;6;6;6,6499999999999995;6;0,0
 31530043001;2,0;2;lead_time_percentile_n_plus_one;;2;6;6;6,6499999999999995;6;0,0
 31530107001;7,0;7;lead_time_percentile_n_plus_one;;11;17;17;17,099999999999998;17;0,0
@@ -3059,11 +2962,9 @@
 31545011001;2,0;2;lead_time_percentile_n_plus_one;;7;12;12;12,35;12;0,0
 31552006001;1,0;1;lead_time_percentile_n_plus_one;;4;16;16;16,15;16;0,0
 31553006001;2,0;2;lead_time_percentile_n_plus_one;;8;14;14;14,25;14;0,0
-31556012001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 31564005001;2,0;2;lead_time_percentile_n_plus_one;;7;15;15;15,2;15;0,0
 31564007001;5,0;5;lead_time_percentile_n_plus_one;;9;10;10;10,45;10;0,0
 31567004001;6,0;6;lead_time_percentile_n_plus_one;;5;7;7;7,6;7;0,0
-31567010001;2,0;2;lead_time_percentile_n_plus_one;;4;7;7;7,6;7;0,0
 31567018001;34,0;34;lead_time_percentile_n_plus_one;;37;16;16;16,15;16;0,0
 31567025001;26,0;26;lead_time_percentile_n_plus_one;;25;13;13;13,299999999999999;13;0,0
 31567030001;5,0;5;lead_time_percentile_n_plus_one;;4;12;12;12,35;12;0,0
@@ -3102,7 +3003,6 @@
 31912036001;2,0;2;lead_time_percentile_n_plus_one;;7;17;17;17,099999999999998;17;0,0
 32400180001;5,0;5;lead_time_percentile_n_plus_one;;8;15;15;15,2;15;0,0
 32410009001;6,0;6;lead_time_percentile_n_plus_one;;7;17;17;17,099999999999998;17;0,0
-32410016001;1,0;1;lead_time_percentile_n_plus_one;;3;14;14;14,25;14;0,0
 32410019001;2,0;2;lead_time_percentile_n_plus_one;;2;13;13;13,299999999999999;13;0,0
 32410022001;6,0;6;lead_time_percentile_n_plus_one;;3;8;8;8,549999999999999;8;0,0
 32410035001;6,0;6;lead_time_percentile_n_plus_one;;5;13;13;13,299999999999999;13;0,0
@@ -3110,12 +3010,10 @@
 32420014001;1,0;1;lead_time_percentile_n_plus_one;;2;12;12;12,35;12;0,0
 32421016001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 32431010001;6,0;6;lead_time_percentile_n_plus_one;;3;6;6;6,6499999999999995;6;0,0
-32470025001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 32500008001;15,0;15;lead_time_percentile_n_plus_one;;5;8;8;8,549999999999999;8;0,0
 32501008001;5,0;5;lead_time_percentile_n_plus_one;;2;2;2;2,8499999999999996;2;0,0
 32501100001;20,0;20;lead_time_percentile_n_plus_one;;15;16;16;16,15;16;0,0
 32502011001;24,0;24;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-32504024001;2,0;2;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 32504025002;6,0;6;lead_time_percentile_n_plus_one;;3;7;7;7,6;7;0,0
 32504043005;9,0;9;lead_time_percentile_n_plus_one;;4;8;8;8,549999999999999;8;0,0
 32517006001;15,0;15;lead_time_percentile_n_plus_one;;3;4;4;4,75;4;0,0
@@ -3126,9 +3024,7 @@
 33551908001;7,0;7;lead_time_percentile_n_plus_one;;21;16;16;16,15;16;0,0
 35300004001;8,0;8;lead_time_percentile_n_plus_one;;3;4;4;4,75;4;0,0
 35301005001;10,0;10;lead_time_percentile_n_plus_one;;11;16;16;16,15;16;0,0
-35302003001;4,0;4;lead_time_percentile_n_plus_one;;2;7;7;7,6;7;0,0
 35311004001;1,0;1;lead_time_percentile_n_plus_one;;2;13;13;13,299999999999999;13;0,0
-35751018001;3,0;3;lead_time_percentile_n_plus_one;;3;8;8;8,549999999999999;8;0,0
 35751019001;11,0;11;lead_time_percentile_n_plus_one;;17;14;14;14,25;14;0,0
 41234002001;2,0;2;lead_time_percentile_n_plus_one;;4;8;8;8,549999999999999;8;0,0
 41234006001;1,0;1;lead_time_percentile_n_plus_one;;3;10;10;10,45;10;0,0
@@ -3144,7 +3040,6 @@
 42014003001;2,0;2;lead_time_percentile_n_plus_one;;2;12;12;12,35;12;0,0
 42015012001;1,0;1;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 61062008001;4,0;4;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
-61080007004;4,0;4;lead_time_percentile_n_plus_one;;1;1;1;1,9;1;0,0
 65106030001;12,0;12;lead_time_percentile_n_plus_one;;37;15;15;15,2;15;0,0
 65106036001;1,0;1;lead_time_percentile_n_plus_one;;4;6;6;6,6499999999999995;6;0,0
 65106084001;3,0;3;lead_time_percentile_n_plus_one;;5;16;16;16,15;16;0,0
