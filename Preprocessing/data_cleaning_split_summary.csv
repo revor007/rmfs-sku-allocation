@@ -1,0 +1,20 @@
+﻿metric,value
+cutoff_ratio,0.8095238095238095
+cutoff_timestamp,2021-08-18 00:05:11.428571
+train_order_rows,171099
+test_order_rows,50070
+train_unique_orders,32614
+test_unique_orders,16912
+train_unique_item_codes,4607
+test_unique_item_codes,3604
+train_product_rows,4607
+test_product_rows,3604
+train_product_unique_item_codes,4607
+test_product_unique_item_codes,3604
+product_overlap_item_codes,3391
+split_order_iqr_multiplier,3.0
+split_order_min_samples,4.0
+split_order_rows_removed,28701.0
+split_order_unique_orders_removed,4796.0
+split_order_unique_item_codes_removed,2431.0
+sku_thresholds_with_outliers,962.0

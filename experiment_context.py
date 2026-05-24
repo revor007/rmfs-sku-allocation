@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 
 
-DEFAULT_CUTOFF_RATIO = 0.70
+# Default cutoff at T = 17 days within the 21-day horizon.
+DEFAULT_CUTOFF_RATIO = 17.0 / 21.0
 
 ORDER_ID_CANDIDATES = ["订单号", "order_id"]
 ORDER_SKU_CANDIDATES = ["商品编码", "item_code"]
@@ -110,23 +111,28 @@ def find_preprocessing_dir(base_dir: Path) -> Path:
 
 
 def find_order_data_path(preprocessing_dir: Path) -> Path:
-    candidates = sorted(
+    candidates = [
         path
         for path in Path(preprocessing_dir).glob("*_final.csv")
         if path.name != "preprocessed_final.csv"
-    )
+    ]
     if not candidates:
         raise FileNotFoundError(
             f"No order data file ending with '_final.csv' was found in {preprocessing_dir}."
         )
-    return candidates[0]
+    return max(candidates, key=lambda path: (path.stat().st_mtime, path.name))
 
 
 def find_product_data_path(preprocessing_dir: Path) -> Path:
-    return _existing_path(
-        [Path(preprocessing_dir) / "preprocessed_final.csv"],
-        "preprocessed_final.csv",
-    )
+    product_candidates = [
+        Path(preprocessing_dir) / "preprocessed_final_latest.csv",
+        Path(preprocessing_dir) / "preprocessed_final.csv",
+    ]
+    existing = [path for path in product_candidates if path.exists()]
+    if not existing:
+        searched = ", ".join(str(path) for path in product_candidates)
+        raise FileNotFoundError(f"Could not locate preprocessed_final.csv. Searched: {searched}")
+    return max(existing, key=lambda path: (path.stat().st_mtime, path.name))
 
 
 def find_translated_info_path(preprocessing_dir: Path) -> Path:
@@ -282,17 +288,29 @@ def load_experiment_context(base_dir: Path, cutoff_ratio: float | None = None) -
         PRODUCT_SKU_CANDIDATES,
         sep=";",
     )
+    max_capacity_skus = load_sku_set_from_file(
+        paths.max_capacity_path,
+        ["item_code"],
+        sep=None,
+    )
     train_aligned_df = train_df[train_df["item_code"].isin(metadata_skus)].copy()
+    test_aligned_df = test_df[test_df["item_code"].isin(metadata_skus)].copy()
     train_order_counts = (
         train_aligned_df.groupby("item_code")["order_id"].nunique().astype(np.int32)
     )
+    test_item_codes = set(test_aligned_df["item_code"].unique())
 
-    eligible_skus = sorted(train_order_counts.index.tolist())
-    historical_skus = sorted(train_order_counts[train_order_counts > 1].index.tolist())
-    new_skus = sorted(train_order_counts[train_order_counts <= 1].index.tolist())
+    # Keep only the shared SKU universe that appears in both train and test
+    # and already has slot-capacity support for optimization.
+    eligible_skus = sorted(
+        set(train_order_counts.index.tolist()) & test_item_codes & max_capacity_skus
+    )
+    eligible_train_order_counts = train_order_counts.reindex(eligible_skus).fillna(0).astype(np.int32)
+    historical_skus = sorted(eligible_train_order_counts[eligible_train_order_counts > 1].index.tolist())
+    new_skus = sorted(eligible_train_order_counts[eligible_train_order_counts <= 1].index.tolist())
 
     train_eligible_df = train_aligned_df[train_aligned_df["item_code"].isin(eligible_skus)].copy()
-    test_eligible_df = test_df[test_df["item_code"].isin(eligible_skus)].copy()
+    test_eligible_df = test_aligned_df[test_aligned_df["item_code"].isin(eligible_skus)].copy()
 
     removed_post_t_zero_history_skus = sorted(
         (set(test_df["item_code"].unique()) & metadata_skus) - set(eligible_skus)
@@ -300,7 +318,7 @@ def load_experiment_context(base_dir: Path, cutoff_ratio: float | None = None) -
 
     sku_status_df = pd.DataFrame({"item_code": eligible_skus})
     sku_status_df["pre_t_order_count"] = (
-        sku_status_df["item_code"].map(train_order_counts).fillna(0).astype(np.int32)
+        sku_status_df["item_code"].map(eligible_train_order_counts).fillna(0).astype(np.int32)
     )
     sku_status_df["sku_status"] = np.where(
         sku_status_df["pre_t_order_count"] > 1,

@@ -1,0 +1,13 @@
+networkx
+matplotlib
+pandas
+pip
+numpy
+torch
+tensorboard
+python-dateutil
+packaging
+requests
+fastapi[standard]
+uvicorn
+pydantic

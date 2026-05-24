@@ -1,0 +1,11 @@
+**/__pycache__
+/.idea/**
+netlogo.state
+/.vscode/**
+/result/**
+/data/input/assign_order.csv
+/ai/maa2c_routing/**
+/ai/mappo_routing/**
+/data/yohana/input/assign_order.csv
+/data/input/**
+/data/output/**
