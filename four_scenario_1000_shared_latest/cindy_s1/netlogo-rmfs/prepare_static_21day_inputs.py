@@ -17,7 +17,19 @@ POD_TYPE = 4
 SLOT_TYPE = 3
 DEFAULT_SLOT_CAPACITY = 40
 
-FCGMA_DIR = Path(__file__).resolve().parents[1]
+SCRIPT_PATH = Path(__file__).resolve()
+FCGMA_DIR = next(
+    (
+        candidate
+        for candidate in (
+            SCRIPT_PATH.parents[1],
+            SCRIPT_PATH.parents[2],
+            SCRIPT_PATH.parents[3],
+        )
+        if (candidate / "experiment_context.py").exists()
+    ),
+    SCRIPT_PATH.parents[1],
+)
 if str(FCGMA_DIR) not in sys.path:
     sys.path.append(str(FCGMA_DIR))
 
@@ -515,6 +527,7 @@ def main():
     workspace_dir = script_dir.parents[1]
     fcgma_dir = find_existing_directory(
         [
+            workspace_dir.parent,
             workspace_dir,
             workspace_dir / "revision-fcgma-copy",
             workspace_dir / "revision-fcgma - Copy" / "rmfs-sku-allocation",
@@ -527,8 +540,8 @@ def main():
     preprocessing_dir = find_existing_directory(
         [
             fcgma_dir / "Preprocessing",
-            workspace_dir / "Preprocessing",
             workspace_dir.parent / "Preprocessing",
+            workspace_dir / "Preprocessing",
         ],
         required_files=["preprocessed_final.csv"],
     )

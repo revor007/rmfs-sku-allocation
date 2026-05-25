@@ -9,3 +9,7 @@ netlogo.state
 /data/yohana/input/assign_order.csv
 /data/input/**
 /data/output/**
+!/data/input/cutoff_test_orders.csv
+!/data/output/generated_pod.csv
+!/data/output/items.csv
+!/data/output/pods.csv
