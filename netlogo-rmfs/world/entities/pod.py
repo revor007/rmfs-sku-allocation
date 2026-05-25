@@ -22,6 +22,8 @@ class Pod(Object):
         self.sku_weights = {}  # Dictionary to store weight per unit for each SKU
         self.current_load_mass = 0  # Current total mass of items in pod
         self.is_awaiting_replenishment = False
+        self.has_pending_replenishment_dispatch = False
+        self.must_replenish_before_pick = False
         
 
     def __eq__(self, other):

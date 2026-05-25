@@ -65,7 +65,7 @@ class PodManager:
                 if pod.pod_number in seen_pods:
                     continue
                 seen_pods.add(pod.pod_number)
-                if pod.is_idle:
+                if pod.is_idle and not pod.is_awaiting_replenishment and not pod.must_replenish_before_pick:
                     qty = pod.getQuantity(sku)
                     if qty > 0:
                         return pod
@@ -81,7 +81,11 @@ class PodManager:
         if sku in self.sku_to_pods:
             for pod in self.sku_to_pods[sku]:
                 similarity_score = 1
-                if pod.is_idle is True:
+                if (
+                    pod.is_idle is True
+                    and not pod.is_awaiting_replenishment
+                    and not pod.must_replenish_before_pick
+                ):
                     pod_skus = [i for i in pod.skus]
                     pod_skus_in_station_skus_mask = np.isin(sku_in_station_list, pod_skus)
                     pod_skus_in_station_skus = np.array(sku_in_station_list)[pod_skus_in_station_skus_mask]
@@ -109,7 +113,7 @@ class PodManager:
 
             assigned_pod = None
             if len(pod_available_for_multiple_items) > 0:
-                assigned_pod_id = pod_available_for_multiple_items.loc[0, "pod_id"]
+                assigned_pod_id = pod_available_for_multiple_items.iloc[0]["pod_id"]
            
                 assigned_pod = self.getPodByNumber(assigned_pod_id)
         
@@ -128,7 +132,11 @@ class PodManager:
             for pod in self.sku_to_pods[sku]:
                 similarity_score = 0
 
-                if pod.is_idle is True:
+                if (
+                    pod.is_idle is True
+                    and not pod.is_awaiting_replenishment
+                    and not pod.must_replenish_before_pick
+                ):
                     # Similarity
                     pod_skus = [i for i in pod.skus]
                     pod_skus_in_station_skus_mask = np.isin(sku_in_station_list, pod_skus)
@@ -164,7 +172,7 @@ class PodManager:
 
             assigned_pod = None
             if len(pod_available_for_multiple_items) > 0:
-                assigned_pod_id = pod_available_for_multiple_items.loc[0, "pod_id"]
+                assigned_pod_id = pod_available_for_multiple_items.iloc[0]["pod_id"]
            
                 assigned_pod = self.getPodByNumber(assigned_pod_id)
         
@@ -512,17 +520,20 @@ class PodManager:
             return distance_to_robot_score
 
         distances = manhattan_distances(pod_coordinate, robots_coordinate)
-        distance_to_robot_score = np.argmin(distances)
+        distance_to_robot_score = float(np.min(distances))
         
         return distance_to_robot_score
     
     def _countFulfillment(self, skus_in_station_dict, pod_skus):
         total_fulfillment = 1
-        pod_skus_copy = pod_skus.copy()
+        pod_skus_copy = {
+            sku: details.get("current_qty", 0)
+            for sku, details in pod_skus.items()
+        }
         for sku in skus_in_station_dict:
             for order_qty in skus_in_station_dict[sku]:
-                if sku in pod_skus_copy and pod_skus_copy[sku]["current_qty"] >= order_qty:
-                    pod_skus_copy[sku]["current_qty"] -= order_qty
+                if sku in pod_skus_copy and pod_skus_copy[sku] >= order_qty:
+                    pod_skus_copy[sku] -= order_qty
                     total_fulfillment += 1
                 else: 
                     continue
