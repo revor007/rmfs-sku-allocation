@@ -111,6 +111,8 @@ while float(warehouse._tick) < horizon_tick:
         stopped_cleanly = True
         break
 elapsed = time.time() - start
+if hasattr(warehouse, "refreshSimulationHealth"):
+    warehouse.refreshSimulationHealth(force_log=True)
 on_hold = int(
     sum(1 for o in warehouse.order_manager.unfinished_orders if getattr(o, "on_hold", False))
 )
@@ -148,6 +150,32 @@ result = pd.DataFrame(
             else 0.0,
             "replenishment_count": int(warehouse.replenishment_count),
             "replenishment_trips": int(warehouse.replenishment_trips),
+            "health_status_final": getattr(warehouse, "health_status", "unknown"),
+            "health_consistency_violations": int(
+                getattr(warehouse, "health_consistency_violations", 0)
+            ),
+            "health_zombie_orders": int(
+                getattr(warehouse, "health_zombie_order_count", 0)
+            ),
+            "health_pending_replenishment_count": int(
+                getattr(warehouse, "health_pending_replenishment_count", 0)
+            ),
+            "health_aged_pending_replenishment_count": int(
+                getattr(warehouse, "health_aged_pending_replenishment_count", 0)
+            ),
+            "health_oldest_pending_replenishment_age": int(
+                getattr(warehouse, "health_oldest_pending_replenishment_age", 0)
+            ),
+            "health_last_progress_tick": int(
+                getattr(warehouse, "health_last_progress_tick", 0)
+            ),
+            "health_progress_gap": max(
+                0,
+                int(float(warehouse._tick)) - int(getattr(warehouse, "health_last_progress_tick", 0)),
+            ),
+            "health_stalled_tick_count": int(
+                getattr(warehouse, "health_stalled_tick_count", 0)
+            ),
             "stop_and_go": int(warehouse.stop_and_go),
             "total_energy": energy,
             "total_fixed_load_energy": fixed_energy,

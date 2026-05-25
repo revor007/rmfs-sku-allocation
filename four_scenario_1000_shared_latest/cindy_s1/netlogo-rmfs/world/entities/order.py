@@ -34,6 +34,14 @@ class Order:
     def commitQuantity(self, sku, quantity):
         self.skus[sku]['quantity_committed'] += quantity
 
+    def releaseCommittedQuantity(self, sku, quantity):
+        if sku not in self.skus or quantity <= 0:
+            return 0
+
+        releasable_quantity = min(quantity, self.skus[sku]['quantity_committed'])
+        self.skus[sku]['quantity_committed'] -= releasable_quantity
+        return releasable_quantity
+
     def deliverQuantity(self, sku, quantity):
         self.skus[sku]['quantity_delivered'] += quantity
         self.skus[sku]['quantity_committed'] -= quantity

@@ -118,6 +118,28 @@ class Warehouse:
         self.replenishment_dispatch_aging_ticks = int(
             os.getenv("RMFS_REPLENISHMENT_AGING_TICKS", "300")
         )
+        self.health_check_interval = int(os.getenv("RMFS_HEALTH_CHECK_INTERVAL", "100"))
+        self.health_stall_ticks = int(os.getenv("RMFS_HEALTH_STALL_TICKS", "600"))
+        self.last_health_check_tick = -1
+        self.health_status = "healthy"
+        self.last_health_status = "healthy"
+        self.health_consistency_violations = 0
+        self.health_zombie_order_count = 0
+        self.health_pending_replenishment_count = 0
+        self.health_aged_pending_replenishment_count = 0
+        self.health_oldest_pending_replenishment_age = 0
+        self.health_last_progress_tick = 0
+        self.health_last_fulfillment_tick = 0
+        self.health_last_pod_visit_tick = 0
+        self.health_last_replenishment_tick = 0
+        self.health_last_queue_change_tick = 0
+        self.health_last_unfinished_decrease_tick = 0
+        self.health_stalled_tick_count = 0
+        self._health_prev_fulfilled_orders = 0
+        self._health_prev_pod_visits = 0
+        self._health_prev_replenishment_trips = 0
+        self._health_prev_sku_queue_len = 0
+        self._health_prev_unfinished_orders = 0
     
     
     def setAssignOrderData(self):
@@ -434,6 +456,14 @@ class Warehouse:
             if self.update_intersection_using_RL:
                 self.intersection_manager.updateModelAfterExecution(self._tick)
 
+        current_tick = int(self._tick)
+        if (
+            self.health_check_interval > 0
+            and current_tick % self.health_check_interval == 0
+            and current_tick != self.last_health_check_tick
+        ):
+            self.refreshSimulationHealth()
+
         self._tick += TICK_TO_SECOND
         self._step += 1
 
@@ -464,6 +494,7 @@ class Warehouse:
 
             remaining_qty = quantity - actual_picked
             if remaining_qty > 0:
+                order.releaseCommittedQuantity(sku, remaining_qty)
                 self.sku_picking_queue.append(
                     {
                         "order_id": order_id,
@@ -654,10 +685,304 @@ class Warehouse:
                 order.addSKU(item['item_id'], item['item_quantity'])
         return new_orders
 
+    def getActiveJobQuantitiesForOrder(self, order_id):
+        active_quantities = {}
+
+        for robot in self.robot_manager.getAllRobots():
+            job = robot.job
+            if job is None or job.is_finished:
+                continue
+
+            for job_order_id, sku, qty in job.orders:
+                if job_order_id != order_id:
+                    continue
+                active_quantities[sku] = active_quantities.get(sku, 0) + qty
+
+        return active_quantities
+
+    def getQueuedQuantitiesForOrder(self, order_id):
+        queued_quantities = {}
+
+        for request in self.sku_picking_queue:
+            if request.get("order_id") != order_id:
+                continue
+
+            sku = request.get("sku")
+            qty = request.get("qty", 0)
+            if sku is None or qty <= 0:
+                continue
+
+            queued_quantities[sku] = queued_quantities.get(sku, 0) + qty
+
+        return queued_quantities
+
+    def repairOrderDemandState(self, order: Order):
+        if order is None or order.isOrderCompleted():
+            return False
+
+        active_job_quantities = self.getActiveJobQuantitiesForOrder(order.id)
+        queued_quantities = self.getQueuedQuantitiesForOrder(order.id)
+        repaired = False
+
+        for sku, details in order.skus.items():
+            delivered_qty = details["quantity_delivered"]
+            committed_qty = details["quantity_committed"]
+            total_qty = details["total_quantity"]
+
+            active_committed_qty = active_job_quantities.get(sku, 0)
+            stranded_committed_qty = max(0, committed_qty - active_committed_qty)
+            if stranded_committed_qty > 0:
+                order.releaseCommittedQuantity(sku, stranded_committed_qty)
+                committed_qty -= stranded_committed_qty
+                repaired = True
+
+            true_remaining_qty = max(0, total_qty - delivered_qty)
+            queued_qty = queued_quantities.get(sku, 0)
+            accounted_qty = active_committed_qty + queued_qty
+            missing_qty = true_remaining_qty - accounted_qty
+
+            if missing_qty > 0:
+                self.sku_picking_queue.append(
+                    {
+                        "order_id": order.id,
+                        "sku": sku,
+                        "qty": missing_qty,
+                    }
+                )
+                queued_quantities[sku] = queued_qty + missing_qty
+                order.is_in_queue = True
+                repaired = True
+
+        return repaired
+
+    def updateHealthProgressMarkers(self):
+        current_tick = int(self._tick)
+        progress_happened = False
+
+        current_fulfilled_orders = int(self.orders_fulfilled)
+        if current_fulfilled_orders > self._health_prev_fulfilled_orders:
+            self.health_last_fulfillment_tick = current_tick
+            progress_happened = True
+        self._health_prev_fulfilled_orders = current_fulfilled_orders
+
+        current_pod_visits = int(self.pod_visit_to_station)
+        if current_pod_visits > self._health_prev_pod_visits:
+            self.health_last_pod_visit_tick = current_tick
+            progress_happened = True
+        self._health_prev_pod_visits = current_pod_visits
+
+        current_replenishment_trips = int(self.replenishment_trips)
+        if current_replenishment_trips > self._health_prev_replenishment_trips:
+            self.health_last_replenishment_tick = current_tick
+            progress_happened = True
+        self._health_prev_replenishment_trips = current_replenishment_trips
+
+        current_sku_queue_len = int(len(self.sku_picking_queue))
+        if current_sku_queue_len != self._health_prev_sku_queue_len:
+            self.health_last_queue_change_tick = current_tick
+            progress_happened = True
+        self._health_prev_sku_queue_len = current_sku_queue_len
+
+        current_unfinished_orders = int(len(self.order_manager.unfinished_orders))
+        if current_unfinished_orders < self._health_prev_unfinished_orders:
+            self.health_last_unfinished_decrease_tick = current_tick
+            progress_happened = True
+        self._health_prev_unfinished_orders = current_unfinished_orders
+
+        if progress_happened:
+            self.health_last_progress_tick = current_tick
+
+    def countHealthConsistencyViolations(self):
+        violations = 0
+        zombie_orders = 0
+
+        for order in self.order_manager.orders:
+            true_remaining_total = 0
+            for details in order.skus.values():
+                total_qty = details["total_quantity"]
+                delivered_qty = details["quantity_delivered"]
+                committed_qty = details["quantity_committed"]
+
+                if delivered_qty < 0 or committed_qty < 0:
+                    violations += 1
+                if delivered_qty > total_qty or committed_qty > total_qty:
+                    violations += 1
+                if delivered_qty + committed_qty > total_qty:
+                    violations += 1
+
+                true_remaining_total += max(0, total_qty - delivered_qty)
+
+            if (
+                order in self.order_manager.unfinished_orders
+                and not order.isOrderCompleted()
+                and not order.getRemainingSKU()
+                and true_remaining_total > 0
+            ):
+                active_job_qty = sum(self.getActiveJobQuantitiesForOrder(order.id).values())
+                queued_qty = sum(self.getQueuedQuantitiesForOrder(order.id).values())
+                if active_job_qty + queued_qty == 0:
+                    zombie_orders += 1
+
+        return violations, zombie_orders
+
+    def getPendingReplenishmentHealth(self):
+        current_tick = int(self._tick)
+        pending_count = len(self.pending_replenishment_dispatches)
+        if pending_count == 0:
+            return 0, 0, 0
+
+        oldest_age = 0
+        aged_count = 0
+        for request in self.pending_replenishment_dispatches:
+            age = max(0, current_tick - int(request.get("created_tick", current_tick)))
+            if age > oldest_age:
+                oldest_age = age
+            if age >= self.replenishment_dispatch_aging_ticks:
+                aged_count += 1
+
+        return pending_count, aged_count, oldest_age
+
+    @staticmethod
+    def getHealthSeverity(status: str) -> int:
+        severity = {
+            "healthy": 0,
+            "warning": 1,
+            "stalled": 2,
+        }
+        return severity.get(status, 0)
+
+    def buildHealthSnapshot(self):
+        current_tick = int(self._tick)
+        progress_gap = max(0, current_tick - self.health_last_progress_tick)
+
+        return {
+            "tick": current_tick,
+            "fulfilled_orders": int(self.orders_fulfilled),
+            "unfinished_orders": int(len(self.order_manager.unfinished_orders)),
+            "job_queue_length": int(len(self.job_queue)),
+            "sku_queue_length": int(len(self.sku_picking_queue)),
+            "pod_visits": int(self.pod_visit_to_station),
+            "replenishment_trips": int(self.replenishment_trips),
+            "pending_replenishment_count": int(self.health_pending_replenishment_count),
+            "aged_pending_replenishment_count": int(self.health_aged_pending_replenishment_count),
+            "oldest_pending_replenishment_age": int(self.health_oldest_pending_replenishment_age),
+            "consistency_violations": int(self.health_consistency_violations),
+            "zombie_orders": int(self.health_zombie_order_count),
+            "last_progress_tick": int(self.health_last_progress_tick),
+            "progress_gap": int(progress_gap),
+            "status": self.health_status,
+        }
+
+    def writeHealthSnapshot(self, snapshot):
+        header = [
+            "tick",
+            "fulfilled_orders",
+            "unfinished_orders",
+            "job_queue_length",
+            "sku_queue_length",
+            "pod_visits",
+            "replenishment_trips",
+            "pending_replenishment_count",
+            "aged_pending_replenishment_count",
+            "oldest_pending_replenishment_age",
+            "consistency_violations",
+            "zombie_orders",
+            "last_progress_tick",
+            "progress_gap",
+            "status",
+        ]
+        data = [snapshot[column] for column in header]
+        write_to_csv(
+            "simulation-health.csv",
+            header,
+            data,
+            self.landscape.current_date_string,
+        )
+
+    def emitHealthStatusIfNeeded(self, snapshot):
+        current_severity = self.getHealthSeverity(snapshot["status"])
+        previous_severity = self.getHealthSeverity(self.last_health_status)
+
+        if (
+            current_severity > previous_severity
+            or (
+                snapshot["status"] != self.last_health_status
+                and snapshot["status"] != "healthy"
+            )
+        ):
+            print(
+                "SIM_HEALTH "
+                f"tick={snapshot['tick']} "
+                f"status={snapshot['status']} "
+                f"fulfilled={snapshot['fulfilled_orders']} "
+                f"unfinished={snapshot['unfinished_orders']} "
+                f"sku_queue={snapshot['sku_queue_length']} "
+                f"pending_repl={snapshot['pending_replenishment_count']} "
+                f"oldest_repl_age={snapshot['oldest_pending_replenishment_age']} "
+                f"zombies={snapshot['zombie_orders']} "
+                f"violations={snapshot['consistency_violations']}"
+            )
+
+        self.last_health_status = snapshot["status"]
+
+    def refreshSimulationHealth(self, force_log: bool = False):
+        self.updateHealthProgressMarkers()
+
+        violations, zombie_orders = self.countHealthConsistencyViolations()
+        pending_count, aged_count, oldest_age = self.getPendingReplenishmentHealth()
+
+        self.health_consistency_violations = violations
+        self.health_zombie_order_count = zombie_orders
+        self.health_pending_replenishment_count = pending_count
+        self.health_aged_pending_replenishment_count = aged_count
+        self.health_oldest_pending_replenishment_age = oldest_age
+
+        current_tick = int(self._tick)
+        progress_gap = max(0, current_tick - self.health_last_progress_tick)
+        unfinished_orders = len(self.order_manager.unfinished_orders)
+        after_last_arrival = current_tick >= int(getattr(self, "last_order_arrival", 0))
+
+        status = "healthy"
+        if violations > 0:
+            status = "stalled"
+        elif zombie_orders > 0:
+            status = "warning"
+
+        if (
+            status != "stalled"
+            and unfinished_orders > 0
+            and progress_gap >= self.health_stall_ticks
+            and (
+                after_last_arrival
+                or len(self.sku_picking_queue) > 0
+                or len(self.pending_replenishment_dispatches) > 0
+            )
+        ):
+            status = "stalled"
+
+        if (
+            status == "healthy"
+            and oldest_age >= max(self.replenishment_dispatch_aging_ticks * 2, self.health_check_interval)
+        ):
+            status = "warning"
+
+        self.health_status = status
+        if status == "stalled":
+            self.health_stalled_tick_count += 1
+
+        snapshot = self.buildHealthSnapshot()
+        if force_log or snapshot["tick"] != self.last_health_check_tick:
+            self.writeHealthSnapshot(snapshot)
+            self.emitHealthStatusIfNeeded(snapshot)
+            self.last_health_check_tick = snapshot["tick"]
+
+        return snapshot
+
     def processOrders(self):
         # Loop pada setiap order yang belum selesai
         orders_to_process = [o for o in self.order_manager.unfinished_orders if not o.on_hold]
         for order in orders_to_process:
+            self.repairOrderDemandState(order)
             can_be_fulfilled, insufficient_skus = self.canFulfillOrder(order)
         
             if not can_be_fulfilled:
@@ -838,7 +1163,6 @@ class Warehouse:
         - Pod availability issues
         """
         if not order or not order.getRemainingSKU():
-            print(f"Order {order.id} is empty or has no remaining SKUs.")
             return True, []  # Empty order is fulfillable
             
         insufficient_skus = []
