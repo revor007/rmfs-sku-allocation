@@ -65,7 +65,7 @@ class PodManager:
                 if pod.pod_number in seen_pods:
                     continue
                 seen_pods.add(pod.pod_number)
-                if pod.is_idle:
+                if pod.is_idle and not pod.is_awaiting_replenishment and not pod.must_replenish_before_pick:
                     qty = pod.getQuantity(sku)
                     if qty > 0:
                         return pod
@@ -81,7 +81,11 @@ class PodManager:
         if sku in self.sku_to_pods:
             for pod in self.sku_to_pods[sku]:
                 similarity_score = 1
-                if pod.is_idle is True:
+                if (
+                    pod.is_idle is True
+                    and not pod.is_awaiting_replenishment
+                    and not pod.must_replenish_before_pick
+                ):
                     pod_skus = [i for i in pod.skus]
                     pod_skus_in_station_skus_mask = np.isin(sku_in_station_list, pod_skus)
                     pod_skus_in_station_skus = np.array(sku_in_station_list)[pod_skus_in_station_skus_mask]
@@ -128,7 +132,11 @@ class PodManager:
             for pod in self.sku_to_pods[sku]:
                 similarity_score = 0
 
-                if pod.is_idle is True:
+                if (
+                    pod.is_idle is True
+                    and not pod.is_awaiting_replenishment
+                    and not pod.must_replenish_before_pick
+                ):
                     # Similarity
                     pod_skus = [i for i in pod.skus]
                     pod_skus_in_station_skus_mask = np.isin(sku_in_station_list, pod_skus)

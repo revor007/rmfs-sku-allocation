@@ -264,6 +264,7 @@ class Warehouse:
         # Give aged replenishment requests a chance to dispatch before
         # regular picking assignment. Non-aged requests wait until after
         # picking dispatch and use any remaining idle robots.
+        self.refreshMandatoryReplenishmentPods()
         self.dispatchPendingReplenishmentRequests(prioritize_aged_only=True)
 
         # Baseline job assignment 
@@ -418,8 +419,10 @@ class Warehouse:
                         
 
                 if o.current_state == 'idle' and o.job is not None:
-                    self.pod_manager.setPodAvailable(o.job.pod)
-                    o.job = None
+                    released_pod = o.job.pod
+                    if not self.tryGuaranteeReplenishmentOnRelease(released_pod, o):
+                        self.pod_manager.setPodAvailable(released_pod)
+                        o.job = None
 
         self.total_energy = total_energy
         self.total_fixed_load_energy = total_fixed_load_energy
@@ -566,6 +569,7 @@ class Warehouse:
         self.replenishment_trips += 1
         pod.is_awaiting_replenishment = False
         pod.has_pending_replenishment_dispatch = False
+        pod.must_replenish_before_pick = False
         if restored_quantities:
             self.recheck_on_hold_orders_for_skus(restored_quantities.keys())
         
@@ -883,7 +887,6 @@ class Warehouse:
                 pod is None
                 or not pod.is_idle
                 or pod.is_awaiting_replenishment
-                or pod.has_pending_replenishment_dispatch
             ):
                 continue
 
@@ -895,12 +898,37 @@ class Warehouse:
         candidate_pods.sort(key=lambda item: item[0])
 
         for _, pod, skus_to_replenish in candidate_pods:
-            self.enqueuePendingReplenishmentDispatch(pod, skus_to_replenish)
+            self.enqueuePendingReplenishmentDispatch(
+                pod,
+                skus_to_replenish,
+                guaranteed_on_release_after_aging=self.hasBlockedDemandForSKUs(
+                    skus_to_replenish
+                ),
+            )
 
-    def enqueuePendingReplenishmentDispatch(self, pod: Pod, skus_to_replenish: List[str]):
+    def enqueuePendingReplenishmentDispatch(
+        self,
+        pod: Pod,
+        skus_to_replenish: List[str],
+        guaranteed_on_release_after_aging: bool = False,
+    ):
         if pod is None or not skus_to_replenish:
             return False
-        if pod.is_awaiting_replenishment or pod.has_pending_replenishment_dispatch:
+        if pod.is_awaiting_replenishment:
+            return False
+
+        existing_request = self.getPendingReplenishmentDispatch(pod.pod_number)
+        if existing_request is not None:
+            merged_skus = sorted(
+                set(existing_request.get("skus_to_replenish", []))
+                .union(skus_to_replenish)
+            )
+            existing_request["skus_to_replenish"] = merged_skus
+            existing_request["guaranteed_on_release_after_aging"] = (
+                existing_request.get("guaranteed_on_release_after_aging", False)
+                or guaranteed_on_release_after_aging
+            )
+            pod.has_pending_replenishment_dispatch = True
             return False
 
         self.pending_replenishment_dispatches.append(
@@ -908,6 +936,9 @@ class Warehouse:
                 "pod_number": int(pod.pod_number),
                 "skus_to_replenish": list(skus_to_replenish),
                 "created_tick": int(self._tick),
+                "guaranteed_on_release_after_aging": bool(
+                    guaranteed_on_release_after_aging
+                ),
             }
         )
         pod.has_pending_replenishment_dispatch = True
@@ -929,6 +960,7 @@ class Warehouse:
             pod = None
         if pod is not None:
             pod.has_pending_replenishment_dispatch = False
+            pod.must_replenish_before_pick = False
         return removed
 
     def dispatchPendingReplenishmentRequests(self, prioritize_aged_only: bool = False):
@@ -1045,6 +1077,7 @@ class Warehouse:
             self.removePendingReplenishmentDispatch(pod.pod_number)
             pod.is_awaiting_replenishment = True
             pod.has_pending_replenishment_dispatch = False
+            pod.must_replenish_before_pick = False
             
             # Track replenishment metrics
             # self.replenishment_trips += 1
@@ -1820,6 +1853,105 @@ class Warehouse:
         pod_sku_set = set(pod.skus.keys())
         skus_to_replenish = sorted(pod_sku_set.intersection(self.global_critical_skus))
         return skus_to_replenish, qj_score
+
+    def getPendingReplenishmentDispatch(self, pod_number: int) -> Optional[Dict]:
+        for request in self.pending_replenishment_dispatches:
+            if int(request["pod_number"]) == int(pod_number):
+                return request
+        return None
+
+    def hasOnHoldDemandForSKUs(self, skus_to_check) -> bool:
+        target_skus = {sku for sku in skus_to_check if sku}
+        if not target_skus:
+            return False
+
+        for order in self.order_manager.unfinished_orders:
+            if not getattr(order, "on_hold", False):
+                continue
+
+            remaining_skus = order.getRemainingSKU()
+            if any(sku in remaining_skus for sku in target_skus):
+                return True
+
+        return False
+
+    def hasActiveQueueDemandForSKUs(self, skus_to_check) -> bool:
+        target_skus = {sku for sku in skus_to_check if sku}
+        if not target_skus:
+            return False
+
+        return any(
+            request.get("sku") in target_skus and request.get("qty", 0) > 0
+            for request in self.sku_picking_queue
+        )
+
+    def hasBlockedDemandForSKUs(self, skus_to_check) -> bool:
+        return self.hasOnHoldDemandForSKUs(skus_to_check) or self.hasActiveQueueDemandForSKUs(
+            skus_to_check
+        )
+
+    def refreshMandatoryReplenishmentPods(self):
+        current_tick = int(self._tick)
+
+        for pod in self.pod_manager.getAllPods():
+            if pod is None or pod.is_awaiting_replenishment:
+                continue
+            pod.must_replenish_before_pick = False
+
+        for request in self.pending_replenishment_dispatches:
+            if not request.get("guaranteed_on_release_after_aging", False):
+                continue
+
+            wait_time = current_tick - int(request["created_tick"])
+            if wait_time < self.replenishment_dispatch_aging_ticks:
+                continue
+            if not self.hasBlockedDemandForSKUs(request.get("skus_to_replenish", [])):
+                continue
+
+            try:
+                pod = self.pod_manager.getPodByNumber(int(request["pod_number"]))
+            except (IndexError, TypeError):
+                pod = None
+
+            if pod is not None and not pod.is_awaiting_replenishment:
+                pod.must_replenish_before_pick = True
+
+    def tryGuaranteeReplenishmentOnRelease(self, pod: Pod, robot: Robot) -> bool:
+        if pod is None or robot is None:
+            return False
+
+        request = self.getPendingReplenishmentDispatch(pod.pod_number)
+        if request is None:
+            return False
+
+        wait_time = int(self._tick) - int(request["created_tick"])
+        if (
+            not request.get("guaranteed_on_release_after_aging", False)
+            or wait_time < self.replenishment_dispatch_aging_ticks
+        ):
+            return False
+        if not self.hasBlockedDemandForSKUs(request.get("skus_to_replenish", [])):
+            return False
+
+        skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
+        if not skus_to_replenish:
+            self.removePendingReplenishmentDispatch(pod.pod_number)
+            return False
+
+        station = self.station_manager.findAvailableReplenishmentStation()
+        if station is None:
+            pod.must_replenish_before_pick = True
+            return False
+
+        success = self.sendPodForReplenishment(
+            pod,
+            station,
+            skus_to_replenish,
+            robot,
+        )
+        if not success:
+            pod.must_replenish_before_pick = True
+        return success
     
     def trigger_bundled_proactive_replenishment(self, pod: Pod, robot: Robot):
         """
@@ -1830,6 +1962,14 @@ class Warehouse:
         skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
         if not skus_to_replenish:
             return
+
+        self.enqueuePendingReplenishmentDispatch(
+            pod,
+            skus_to_replenish,
+            guaranteed_on_release_after_aging=self.hasBlockedDemandForSKUs(
+                skus_to_replenish
+            ),
+        )
 
         available_station = self.station_manager.findAvailableReplenishmentStation()
         if available_station:
