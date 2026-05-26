@@ -98,6 +98,17 @@ def _existing_path(candidates: list[Path], description: str) -> Path:
     raise FileNotFoundError(f"Could not locate {description}. Searched: {searched}")
 
 
+def get_writable_output_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+
+    try:
+        with open(path, "a", encoding="utf-8"):
+            return path
+    except PermissionError:
+        return path.with_name(f"{path.stem}_latest{path.suffix}")
+
+
 def find_preprocessing_dir(base_dir: Path) -> Path:
     base_dir = Path(base_dir).resolve()
     return _existing_path(
@@ -300,14 +311,11 @@ def load_experiment_context(base_dir: Path, cutoff_ratio: float | None = None) -
     )
     test_item_codes = set(test_aligned_df["item_code"].unique())
 
-    # Keep only the shared SKU universe that appears in both train and test
-    # and already has slot-capacity support for optimization.
-    eligible_skus = sorted(
-        set(train_order_counts.index.tolist()) & test_item_codes & max_capacity_skus
-    )
+    train_present_skus = set(train_order_counts.index.tolist())
+    historical_skus = sorted(train_present_skus & max_capacity_skus)
+    new_skus = sorted((test_item_codes - train_present_skus) & max_capacity_skus)
+    eligible_skus = sorted(set(historical_skus) | set(new_skus))
     eligible_train_order_counts = train_order_counts.reindex(eligible_skus).fillna(0).astype(np.int32)
-    historical_skus = sorted(eligible_train_order_counts[eligible_train_order_counts > 1].index.tolist())
-    new_skus = sorted(eligible_train_order_counts[eligible_train_order_counts <= 1].index.tolist())
 
     train_eligible_df = train_aligned_df[train_aligned_df["item_code"].isin(eligible_skus)].copy()
     test_eligible_df = test_aligned_df[test_aligned_df["item_code"].isin(eligible_skus)].copy()
@@ -321,7 +329,7 @@ def load_experiment_context(base_dir: Path, cutoff_ratio: float | None = None) -
         sku_status_df["item_code"].map(eligible_train_order_counts).fillna(0).astype(np.int32)
     )
     sku_status_df["sku_status"] = np.where(
-        sku_status_df["pre_t_order_count"] > 1,
+        sku_status_df["pre_t_order_count"] >= 1,
         "historical",
         "new",
     )
@@ -347,8 +355,8 @@ def save_cutoff_artifacts(context: ExperimentContext, output_dir: Path) -> tuple
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    eligible_path = output_dir / "eligible_master_skus.csv"
-    status_path = output_dir / "sku_status_by_cutoff.csv"
+    eligible_path = get_writable_output_path(output_dir / "eligible_master_skus.csv")
+    status_path = get_writable_output_path(output_dir / "sku_status_by_cutoff.csv")
 
     pd.DataFrame({"item_code": context.eligible_skus}).to_csv(
         eligible_path,
