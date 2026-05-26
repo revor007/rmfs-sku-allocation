@@ -4,7 +4,6 @@ import sys
 import numpy as np
 import pandas as pd
 from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.spatial.distance import pdist
 from sklearn.metrics import silhouette_score
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -17,20 +16,45 @@ OUTPUT_PATH = Path(__file__).resolve().parent / "time-series-clustering-results.
 SUMMARY_PATH = Path(__file__).resolve().parent / "time-series-clustering-summary.csv"
 
 
-def build_daily_demand_matrix(order_df: pd.DataFrame) -> pd.DataFrame:
-    daily = (
-        order_df.groupby(["item_code", "order_date"], as_index=False)["quantity"]
-        .sum()
-        .rename(columns={"quantity": "daily_demand"})
+def build_daily_order_frequency_matrix(order_df: pd.DataFrame, date_col: str = "created_at", order_id_col: str = "order_id",) -> pd.DataFrame:
+
+    order_df = order_df.copy()
+    
+    order_df[date_col] = pd.to_datetime(
+        order_df[date_col],
+        dayfirst=True,
+        errors="coerce",
+    ).dt.normalize()
+        
+    daily_freq = (
+        order_df.groupby(["item_code", date_col], as_index=False)[order_id_col]
+        .nunique()
+        .rename(columns={order_id_col: "daily_order_frequency"})
     )
-    pivot = daily.pivot_table(
+
+    pivot = daily_freq.pivot_table(
         index="item_code",
-        columns="order_date",
-        values="daily_demand",
+        columns=date_col,
+        values="daily_order_frequency",
         fill_value=0.0,
     )
+    
+    full_dates = pd.date_range(
+            order_df[date_col].min(),
+            order_df[date_col].max(),
+            freq="D",
+    )
+
+    pivot = pivot.reindex(columns=full_dates, fill_value=0.0)
+
+    
     return pivot.sort_index()
 
+def build_normalized_frequency_pattern_matrix(freq_matrix: pd.DataFrame) -> np.ndarray:
+    values = freq_matrix.to_numpy(dtype=float)
+    row_sum = values.sum(axis=1, keepdims=True)
+    pattern_values = values / np.maximum(row_sum, 1e-12)
+    return values
 
 def wcsse_score(values: np.ndarray, labels: np.ndarray) -> float:
     total = 0.0
@@ -106,22 +130,29 @@ def main():
     if historical_orders.empty:
         raise ValueError("No historical pre-T orders remain for time-series clustering.")
 
-    demand_matrix = build_daily_demand_matrix(historical_orders)
-    log_demand_matrix = np.log1p(demand_matrix.to_numpy(dtype=float))
+    freq_matrix = build_daily_order_frequency_matrix(
+        historical_orders,
+        date_col="created_at",
+        order_id_col="order_id",
+    )
+    
+    pattern_matrix = build_normalized_frequency_pattern_matrix(freq_matrix)
 
-    if demand_matrix.shape[0] < 2:
-        cluster_labels = np.ones(demand_matrix.shape[0], dtype=np.int32)
+    if pattern_matrix.shape[0] < 2:
+        cluster_labels = np.ones(pattern_matrix.shape[0], dtype=np.int32)
         best_k = 1
         summary = pd.DataFrame(
             [{"actual_n_clusters": 1, "silhouette_score": np.nan, "wcsse": 0.0}]
         )
     else:
-        cluster_labels, best_k, summary = choose_cluster_count(log_demand_matrix)
+        cluster_labels, best_k, summary = choose_cluster_count(pattern_matrix)
 
     cluster_df = pd.DataFrame(
         {
-            "item_code": demand_matrix.index.astype(str),
+            "item_code": freq_matrix.index.astype(str),
             "cluster": cluster_labels,
+            "total_order_frequency": freq_matrix.sum(axis=1).to_numpy(dtype=float),
+            "active_days": (freq_matrix > 0).sum(axis=1).to_numpy(dtype=int),
         }
     )
     cluster_df.to_csv(OUTPUT_PATH, index=False, sep=";", encoding="utf-8-sig")

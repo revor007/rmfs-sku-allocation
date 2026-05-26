@@ -156,6 +156,8 @@ def main():
     print(f"Historical SKUs: {len(context.historical_skus):,}")
     print(f"New SKUs: {len(context.new_skus):,}")
     print(f"Minimum inventory saved to: {output_path}")
+    if detail_path != DETAIL_PATH:
+        print(f"Minimum inventory detail saved to fallback path: {detail_path}")
 
 
 if __name__ == "__main__":

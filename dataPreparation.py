@@ -1,9 +1,10 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from experiment_context import find_column, load_experiment_context, normalize_item_code
+
 
 MINIMUM_INVENTORY_CANDIDATES = [
     "minimum_inventory_ceiling",
@@ -11,6 +12,14 @@ MINIMUM_INVENTORY_CANDIDATES = [
     "reorder_point",
     "reorder_point_pcs",
 ]
+
+
+def load_pairwise_matrix(path_hint):
+    path = Path(path_hint).resolve()
+    df = pd.read_csv(path, sep=";", decimal=",", engine="python", index_col=0)
+    df.index = df.index.map(normalize_item_code)
+    df.columns = df.columns.map(normalize_item_code)
+    return df
 
 
 def load_minimum_inventory_frame(path_hint):
@@ -119,7 +128,11 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
 
         for row in bc_df.itertuples(index=False):
             new_idx = sku_to_idx.get(row.new_product_code)
-            hist_idx = sku_to_idx.get(row.corresponding_historical_product) if row.corresponding_historical_product else None
+            hist_idx = (
+                sku_to_idx.get(row.corresponding_historical_product)
+                if row.corresponding_historical_product
+                else None
+            )
             if new_idx is None:
                 continue
 
@@ -147,15 +160,12 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
         set(range(PN)) - set(random_new_indices) - set(common_new_indices)
     )
 
-    # Keep each SKU's own target quantity; common allocation shares placement,
-    # not the leader SKU's demand level.
     effective_g = np.asarray(g, dtype=np.int32).copy()
-
-    # Use each SKU's raw storage-quantity slot demand directly.
-    # Random-new products no longer inherit a historical average slot floor.
     stage_required_slots = np.ceil(effective_g / p).astype(np.int32)
     historical_slots = stage_required_slots[np.asarray(historical_indices, dtype=np.int32)]
-    average_historical_slots = int(max(1, np.ceil(historical_slots.mean()))) if historical_slots.size else 1
+    average_historical_slots = (
+        int(max(1, np.ceil(historical_slots.mean()))) if historical_slots.size else 1
+    )
 
     common_group_members = {}
     common_group_leaders = sorted(common_groups)
@@ -195,7 +205,9 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
         key=lambda entity: (-entity["total_load"], -entity["member_count"], entity["leader_idx"])
     )
 
-    total_required_slots = int(stage_required_slots[np.asarray(random_new_indices, dtype=np.int32)].sum())
+    total_required_slots = int(
+        stage_required_slots[np.asarray(random_new_indices, dtype=np.int32)].sum()
+    )
     total_required_slots += int(sum(entity["total_load"] for entity in stage2_entities))
     M = max(1, int(np.ceil(total_required_slots / G_scalar)))
     G = np.full(M, G_scalar, dtype=np.int32)
@@ -245,13 +257,8 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
 
 
 def load_data(path_u, path_s, path_min_inv, G_scalar, path_max_cap, path_stage1=None, random_seed=42):
-    U_df = pd.read_csv(path_u, sep=";", decimal=",", engine="python", index_col=0)
-    S_df = pd.read_csv(path_s, sep=";", decimal=",", engine="python", index_col=0)
-
-    U_df.index = U_df.index.map(normalize_item_code)
-    U_df.columns = U_df.columns.map(normalize_item_code)
-    S_df.index = S_df.index.map(normalize_item_code)
-    S_df.columns = S_df.columns.map(normalize_item_code)
+    U_df = load_pairwise_matrix(path_u)
+    S_df = load_pairwise_matrix(path_s)
 
     g_df, g_value_col, g_source_path = load_minimum_inventory_frame(path_min_inv)
 
@@ -273,7 +280,7 @@ def load_data(path_u, path_s, path_min_inv, G_scalar, path_max_cap, path_stage1=
     )
     if not common_skus:
         raise ValueError(
-            "No common SKUs were found across U, S, minimum inventory, max capacity, "
+            "No common SKUs were found across U, minimum inventory, max capacity, "
             "and the cutoff-aligned eligible SKU universe."
         )
 
@@ -325,4 +332,3 @@ def load_data_rmfs(path_u, path_s, path_min_inv, G_scalar, path_max_cap, lam=0.5
         random_seed=random_seed,
     )
     return U, S, sku_codes, G, g, p, lam, M, stage_meta
-

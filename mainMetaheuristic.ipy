@@ -34,7 +34,7 @@ def _env_bool(name: str, default: bool) -> bool:
 # Define configuration parameters
 
 MaxFuncEvals = _env_int("FCGMA_MAX_FUNC_EVALS", 15000)
-MaxIter = _env_int("FCGMA_MAX_ITER", 100)
+MaxIter = _env_int("FCGMA_MAX_ITER", 1)
 trials = _env_int("FCGMA_TRIALS", 1)
 IterPrint = _env_int("FCGMA_ITER_PRINT", 10)
 InitPopSize = _env_int("FCGMA_INIT_POP", 100)
