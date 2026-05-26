@@ -508,6 +508,9 @@ class Warehouse:
 
             # SKU Replenished Triggered
             if(replenished_status == True): sku_need_replenished.append(sku)
+
+        if sku_need_replenished:
+            self.global_critical_skus.update(sku_need_replenished)
     
     #     return None
 
@@ -593,6 +596,11 @@ class Warehouse:
                 if restored_qty > 0:
                     restored_quantities[sku_id] = restored_qty
                     self.pod_manager.increaseSKUData(sku_id, restored_qty)
+                    _, still_below_reorder = self.pod_manager.isSKUNeedReplenishment(sku_id)
+                    if still_below_reorder:
+                        self.global_critical_skus.add(sku_id)
+                    else:
+                        self.global_critical_skus.discard(sku_id)
 
         # Update metrik
         self.replenishment_count += skus_replenished
@@ -1198,61 +1206,46 @@ class Warehouse:
 
     def checkAndTriggerProactiveReplenishment(self):
         """
-        Periodically sweep idle pods and enqueue replenishment dispatch
-        requests using the same pod-health + global-watchlist rule as the
-        post-pick replenishment path.
+        Periodically sweep globally critical SKUs and assign at most one
+        replenishment request to the single most depleted eligible pod for
+        each SKU.
         """
         if not self.global_critical_skus:
             return
 
-        candidate_pods = []
-        for pod in self.pod_manager.getAllPods():
-            if (
-                pod is None
-                or not pod.is_idle
-                or pod.is_awaiting_replenishment
-            ):
-                continue
-
-            skus_to_replenish, qj_score = self.get_replenishment_skus_for_pod(pod)
-            if skus_to_replenish:
-                candidate_pods.append((qj_score, pod, skus_to_replenish))
-
-        # Lowest-health pods first.
-        candidate_pods.sort(key=lambda item: item[0])
-
-        for _, pod, skus_to_replenish in candidate_pods:
-            self.enqueuePendingReplenishmentDispatch(
-                pod,
-                skus_to_replenish,
-                guaranteed_on_release_after_aging=self.hasBlockedDemandForSKUs(
-                    skus_to_replenish
-                ),
-            )
+        for sku_id in sorted(self.global_critical_skus):
+            self.enqueueBestReplenishmentDispatchForSKU(sku_id)
 
     def enqueuePendingReplenishmentDispatch(
         self,
         pod: Pod,
         skus_to_replenish: List[str],
-        guaranteed_on_release_after_aging: bool = False,
     ):
         if pod is None or not skus_to_replenish:
             return False
         if pod.is_awaiting_replenishment:
             return False
 
+        urgency_level = self.getReplenishmentUrgencyLevel(skus_to_replenish)
         existing_request = self.getPendingReplenishmentDispatch(pod.pod_number)
         if existing_request is not None:
             merged_skus = sorted(
                 set(existing_request.get("skus_to_replenish", []))
                 .union(skus_to_replenish)
             )
+            merged_urgency = max(
+                int(existing_request.get("urgency_level", 0)),
+                self.getReplenishmentUrgencyLevel(merged_skus),
+            )
             existing_request["skus_to_replenish"] = merged_skus
-            existing_request["guaranteed_on_release_after_aging"] = (
-                existing_request.get("guaranteed_on_release_after_aging", False)
-                or guaranteed_on_release_after_aging
+            existing_request["urgency_level"] = merged_urgency
+            existing_request["guaranteed_on_release"] = (
+                bool(existing_request.get("guaranteed_on_release", False))
+                or merged_urgency > 0
             )
             pod.has_pending_replenishment_dispatch = True
+            if bool(existing_request.get("guaranteed_on_release", False)):
+                pod.must_replenish_before_pick = True
             return False
 
         self.pending_replenishment_dispatches.append(
@@ -1260,12 +1253,13 @@ class Warehouse:
                 "pod_number": int(pod.pod_number),
                 "skus_to_replenish": list(skus_to_replenish),
                 "created_tick": int(self._tick),
-                "guaranteed_on_release_after_aging": bool(
-                    guaranteed_on_release_after_aging
-                ),
+                "urgency_level": int(urgency_level),
+                "guaranteed_on_release": bool(urgency_level > 0),
             }
         )
         pod.has_pending_replenishment_dispatch = True
+        if urgency_level > 0:
+            pod.must_replenish_before_pick = True
         return True
 
     def removePendingReplenishmentDispatch(self, pod_number: int):
@@ -1293,11 +1287,21 @@ class Warehouse:
 
         dispatched_count = 0
         current_tick = int(self._tick)
-        pending_requests = list(self.pending_replenishment_dispatches)
+        pending_requests = sorted(
+            list(self.pending_replenishment_dispatches),
+            key=lambda request: (
+                0 if self.shouldGuaranteeReplenishmentRequest(request, current_tick) else 1,
+                -int(request.get("urgency_level", 0)),
+                -(current_tick - int(request.get("created_tick", current_tick))),
+                int(request.get("pod_number", 0)),
+            ),
+        )
 
         for request in pending_requests:
-            wait_time = current_tick - int(request["created_tick"])
-            if prioritize_aged_only and wait_time < self.replenishment_dispatch_aging_ticks:
+            if (
+                prioritize_aged_only
+                and not self.shouldGuaranteeReplenishmentRequest(request, current_tick)
+            ):
                 continue
 
             station = self.station_manager.findAvailableReplenishmentStation()
@@ -2120,23 +2124,18 @@ class Warehouse:
             
     def update_global_sku_watchlist(self):
         """
-        Fungsi ini nge-scan semua SKU di gudang dan bikin daftar mana aja
-        yang stoknya tipis secara global.
+        Rebuild the global watchlist from absolute reorder-point metadata.
         """
-        self.global_critical_skus = set()  # Pake 'set' biar cepet ngeceknya nanti
-
-        all_skus_data = self.pod_manager.getAllSKUData() # Ambil data semua SKU
+        self.global_critical_skus = set()
+        all_skus_data = self.pod_manager.getAllSKUData()
 
         for sku_id, data in all_skus_data.items():
-            max_qty = data['max_global_qty']
-            if max_qty <= 0:
+            reorder_point_qty = int(data.get("global_reorder_point_qty", 0))
+            if reorder_point_qty <= 0:
                 continue
 
-            # Hitung level kesehatan global (Ui)
-            global_level = data['current_global_qty'] / max_qty
-            
-            # Kalo di bawah ambang batas, masukin ke daftar kritis
-            if global_level < self.global_watchlist_threshold:
+            current_global_qty = int(data.get("current_global_qty", 0))
+            if current_global_qty <= reorder_point_qty:
                 self.global_critical_skus.add(sku_id)
 
     def get_pod_average_fill_score(self, pod: Pod) -> float:
@@ -2158,29 +2157,75 @@ class Warehouse:
 
         return total_inventory_level / counted_skus
 
+    def get_below_reorder_skus_for_pod(self, pod: Pod) -> List[int]:
+        if pod is None or not pod.skus:
+            return []
+
+        critical_skus = []
+        for sku_id in pod.skus.keys():
+            _, needs_replenishment = self.pod_manager.isSKUNeedReplenishment(sku_id)
+            if needs_replenishment:
+                self.global_critical_skus.add(sku_id)
+                critical_skus.append(sku_id)
+
+        return sorted(critical_skus)
+
+    def get_pod_critical_fill_score(
+        self,
+        pod: Pod,
+        critical_skus: Optional[List[int]] = None,
+    ) -> float:
+        if pod is None or not pod.skus:
+            return 1.0
+
+        if critical_skus is None:
+            critical_skus = self.get_below_reorder_skus_for_pod(pod)
+
+        if not critical_skus:
+            return 1.0
+
+        fill_ratios = []
+        for sku_id in critical_skus:
+            details = pod.skus.get(sku_id)
+            if not details:
+                continue
+
+            limit_qty = details.get("limit_qty", 0)
+            if limit_qty <= 0:
+                continue
+
+            current_qty = details.get("current_qty", 0)
+            fill_ratios.append(max(0.0, min(1.0, current_qty / limit_qty)))
+
+        if not fill_ratios:
+            return 1.0
+
+        return float(sum(fill_ratios) / len(fill_ratios))
+
     def get_replenishment_skus_for_pod(self, pod: Pod) -> tuple[list, float]:
         """
-        Shared replenishment rule used by both the post-pick trigger and the
-        periodic idle-pod sweep.
-
-        Returns a tuple of:
-        - list of SKUs to replenish
-        - the pod average-fill score (Qj)
+        Returns the below-reorder SKUs that make this pod eligible for
+        replenishment, using Qj_critical as the binary pod-level gate.
         """
         if pod is None or not pod.skus:
             return [], 1.0
 
-        qj_score = self.get_pod_average_fill_score(pod)
+        critical_skus = self.get_below_reorder_skus_for_pod(pod)
+        qj_score = self.get_pod_critical_fill_score(pod, critical_skus)
         if qj_score >= self.pod_replenishment_threshold:
             return [], qj_score
 
-        pod_sku_set = set(pod.skus.keys())
-        skus_to_replenish = sorted(pod_sku_set.intersection(self.global_critical_skus))
-        return skus_to_replenish, qj_score
+        return critical_skus, qj_score
 
     def getPendingReplenishmentDispatch(self, pod_number: int) -> Optional[Dict]:
         for request in self.pending_replenishment_dispatches:
             if int(request["pod_number"]) == int(pod_number):
+                return request
+        return None
+
+    def getPendingReplenishmentRequestForSKU(self, sku_id: int) -> Optional[Dict]:
+        for request in self.pending_replenishment_dispatches:
+            if sku_id in request.get("skus_to_replenish", []):
                 return request
         return None
 
@@ -2209,10 +2254,88 @@ class Warehouse:
             for request in self.sku_picking_queue
         )
 
-    def hasBlockedDemandForSKUs(self, skus_to_check) -> bool:
-        return self.hasOnHoldDemandForSKUs(skus_to_check) or self.hasActiveQueueDemandForSKUs(
-            skus_to_check
-        )
+    def getReplenishmentUrgencyLevel(self, skus_to_check) -> int:
+        if self.hasOnHoldDemandForSKUs(skus_to_check):
+            return 2
+        if self.hasActiveQueueDemandForSKUs(skus_to_check):
+            return 1
+        return 0
+
+    def shouldGuaranteeReplenishmentRequest(
+        self,
+        request: Optional[Dict],
+        current_tick: Optional[int] = None,
+    ) -> bool:
+        if request is None:
+            return False
+
+        if current_tick is None:
+            current_tick = int(self._tick)
+
+        if bool(request.get("guaranteed_on_release", False)):
+            return True
+
+        wait_time = current_tick - int(request.get("created_tick", current_tick))
+        return wait_time >= self.replenishment_dispatch_aging_ticks
+
+    def getMostDepletedEligiblePodForSKU(self, sku_id: int):
+        pods_with_sku = self.pod_manager.getPodsBySKU(sku_id) or []
+        best_candidate = None
+        best_key = None
+
+        for pod in pods_with_sku:
+            if pod is None or pod.is_awaiting_replenishment:
+                continue
+
+            skus_to_replenish, qj_score = self.get_replenishment_skus_for_pod(pod)
+            if not skus_to_replenish or sku_id not in skus_to_replenish:
+                continue
+
+            sku_details = pod.skus.get(sku_id, {})
+            sku_limit_qty = sku_details.get("limit_qty", 0)
+            sku_current_qty = sku_details.get("current_qty", 0)
+            sku_fill_ratio = (
+                sku_current_qty / sku_limit_qty
+                if sku_limit_qty > 0
+                else 1.0
+            )
+            idle_penalty = 0 if pod.is_idle else 1
+            candidate_key = (
+                qj_score,
+                sku_fill_ratio,
+                idle_penalty,
+                int(pod.pod_number),
+            )
+
+            if best_key is None or candidate_key < best_key:
+                best_key = candidate_key
+                best_candidate = (pod, skus_to_replenish, qj_score)
+
+        return best_candidate
+
+    def enqueueBestReplenishmentDispatchForSKU(self, sku_id: int) -> bool:
+        existing_request = self.getPendingReplenishmentRequestForSKU(sku_id)
+        if existing_request is not None:
+            try:
+                existing_pod = self.pod_manager.getPodByNumber(
+                    int(existing_request["pod_number"])
+                )
+            except (IndexError, TypeError):
+                existing_pod = None
+
+            if existing_pod is not None:
+                return self.enqueuePendingReplenishmentDispatch(
+                    existing_pod,
+                    existing_request.get("skus_to_replenish", []),
+                )
+            return False
+
+        candidate = self.getMostDepletedEligiblePodForSKU(sku_id)
+        if candidate is None:
+            return False
+
+        pod, skus_to_replenish, _ = candidate
+        return self.enqueuePendingReplenishmentDispatch(pod, skus_to_replenish)
 
     def refreshMandatoryReplenishmentPods(self):
         current_tick = int(self._tick)
@@ -2223,13 +2346,7 @@ class Warehouse:
             pod.must_replenish_before_pick = False
 
         for request in self.pending_replenishment_dispatches:
-            if not request.get("guaranteed_on_release_after_aging", False):
-                continue
-
-            wait_time = current_tick - int(request["created_tick"])
-            if wait_time < self.replenishment_dispatch_aging_ticks:
-                continue
-            if not self.hasBlockedDemandForSKUs(request.get("skus_to_replenish", [])):
+            if not self.shouldGuaranteeReplenishmentRequest(request, current_tick):
                 continue
 
             try:
@@ -2248,13 +2365,7 @@ class Warehouse:
         if request is None:
             return False
 
-        wait_time = int(self._tick) - int(request["created_tick"])
-        if (
-            not request.get("guaranteed_on_release_after_aging", False)
-            or wait_time < self.replenishment_dispatch_aging_ticks
-        ):
-            return False
-        if not self.hasBlockedDemandForSKUs(request.get("skus_to_replenish", [])):
+        if not self.shouldGuaranteeReplenishmentRequest(request, int(self._tick)):
             return False
 
         skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
@@ -2279,22 +2390,16 @@ class Warehouse:
     
     def trigger_bundled_proactive_replenishment(self, pod: Pod, robot: Robot):
         """
-        Mengecek "kesehatan rata-rata" sebuah pod dan mengirimnya untuk 
-        replenishment JIKA skornya di bawah threshold.
-        Hanya me-replenish SKU yang ada di daftar kritis global.
+        After a picking job finishes on a pod, revisit any SKUs in that pod
+        that have crossed their reorder point and enqueue one replenishment
+        request per critical SKU using the single-most-depleted eligible pod.
         """
-        skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
-        if not skus_to_replenish:
+        if pod is None:
             return
 
-        self.enqueuePendingReplenishmentDispatch(
-            pod,
-            skus_to_replenish,
-            guaranteed_on_release_after_aging=self.hasBlockedDemandForSKUs(
-                skus_to_replenish
-            ),
-        )
+        critical_skus = self.get_below_reorder_skus_for_pod(pod)
+        if not critical_skus:
+            return
 
-        available_station = self.station_manager.findAvailableReplenishmentStation()
-        if available_station:
-            self.sendPodForReplenishment(pod, available_station, skus_to_replenish, robot)
+        for sku_id in critical_skus:
+            self.enqueueBestReplenishmentDispatchForSKU(sku_id)
