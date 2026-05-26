@@ -50,6 +50,7 @@ MASTER_CARTON_WIDTH_CANDIDATES = ["(箱)寬cm", "(箱)寬 (Width) cm"]
 MASTER_CARTON_HEIGHT_CANDIDATES = ["(箱)高cm", "(箱)高 (Heigth) cm"]
 MASTER_CARTON_WEIGHT_CANDIDATES = ["(箱)重量", "(箱)重量 (Weigth)"]
 MASTER_UNITS_PER_CARTON_CANDIDATES = ["箱入數", "箱入數 (Number of Cartons)"]
+MASTER_INVENTORY_QUANTITY_CANDIDATES = ["庫存量", "庫存量 (Inventory Quantity)"]
 
 ORDER_ID_CANDIDATES = ["订单号", "order_id"]
 ORDER_ITEM_CODE_CANDIDATES = ["商品编码", "item_code"]
@@ -546,6 +547,10 @@ def prepare_master_product_data(
         master_df.columns,
         MASTER_UNITS_PER_CARTON_CANDIDATES,
     )
+    inventory_quantity_col = find_column(
+        master_df.columns,
+        MASTER_INVENTORY_QUANTITY_CANDIDATES,
+    )
 
     prepared = master_df[
         [
@@ -556,6 +561,7 @@ def prepare_master_product_data(
             carton_height_col,
             carton_weight_col,
             units_per_carton_col,
+            inventory_quantity_col,
         ]
     ].copy()
     prepared.columns = [
@@ -566,12 +572,16 @@ def prepare_master_product_data(
         "carton_height_raw",
         "carton_weight_raw",
         "units_per_carton_raw",
+        "inventory_quantity_raw",
     ]
 
     prepared["item_code"] = prepared["item_code"].map(normalize_item_code)
     prepared["master_query"] = prepared["master_query"].map(normalize_lookup_text)
     for raw_col in MASTER_DIMENSION_RENAME_MAP:
         prepared[raw_col] = pd.to_numeric(prepared[raw_col], errors="coerce")
+    prepared["inventory_quantity_raw"] = pd.to_numeric(
+        prepared["inventory_quantity_raw"], errors="coerce"
+    )
 
     prepared["_dimension_completeness"] = prepared[list(MASTER_DIMENSION_RENAME_MAP)].notna().sum(axis=1)
     prepared = prepared.sort_values(
@@ -581,6 +591,9 @@ def prepare_master_product_data(
 
     master_by_item_code = prepared.drop_duplicates(subset=["item_code"], keep="first").copy()
     master_by_item_code = master_by_item_code.rename(columns=MASTER_DIMENSION_RENAME_MAP)
+    master_by_item_code = master_by_item_code.rename(
+        columns={"inventory_quantity_raw": "inventory_quantity"}
+    )
 
     master_note_groups = {
         query_key: group.copy()
@@ -1118,6 +1131,7 @@ def finalize_product_columns(df: pd.DataFrame) -> pd.DataFrame:
         "carton_height_cm",
         "carton_weight",
         "units_per_carton",
+        "inventory_quantity",
     ]
     return df[final_columns].copy()
 
@@ -1146,6 +1160,7 @@ def build_preprocessed_datasets(
                 "carton_height_cm",
                 "carton_weight",
                 "units_per_carton",
+                "inventory_quantity",
             ]
         ],
         on="item_code",

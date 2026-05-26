@@ -17,7 +17,19 @@ POD_TYPE = 4
 SLOT_TYPE = 3
 DEFAULT_SLOT_CAPACITY = 40
 
-FCGMA_DIR = Path(__file__).resolve().parents[1]
+SCRIPT_PATH = Path(__file__).resolve()
+FCGMA_DIR = next(
+    (
+        candidate
+        for candidate in (
+            SCRIPT_PATH.parents[1],
+            SCRIPT_PATH.parents[2],
+            SCRIPT_PATH.parents[3],
+        )
+        if (candidate / "experiment_context.py").exists()
+    ),
+    SCRIPT_PATH.parents[1],
+)
 if str(FCGMA_DIR) not in sys.path:
     sys.path.append(str(FCGMA_DIR))
 
@@ -189,13 +201,23 @@ def prepare_inputs(
     metadata["item_code"] = metadata["item_code"].map(normalize_item_code)
 
     translated = load_semicolon_csv(translated_info_path)
-    translated_code_col = find_column(translated.columns, ["item code"])
-    translated_name_col = find_column(translated.columns, ["notes_en", "notes"])
-    translated_length_col = find_column(translated.columns, ["length carton", "(箱)長"])
-    translated_width_col = find_column(translated.columns, ["width", "(箱)寬"])
-    translated_height_col = find_column(translated.columns, ["heigth", "height", "(箱)高"])
-    translated_weight_col = find_column(translated.columns, ["weigth", "weight", "(箱)重量"])
-    translated_units_col = find_column(translated.columns, ["number of cartons", "箱入數"])
+    translated_code_col = find_column(translated.columns, ["item code", "item_code"])
+    translated_name_col = find_column(translated.columns, ["notes_en", "notes", "title"])
+    translated_length_col = find_column(
+        translated.columns, ["length carton", "(箱)長", "carton_length_cm"]
+    )
+    translated_width_col = find_column(
+        translated.columns, ["width", "(箱)寬", "carton_width_cm"]
+    )
+    translated_height_col = find_column(
+        translated.columns, ["heigth", "height", "(箱)高", "carton_height_cm"]
+    )
+    translated_weight_col = find_column(
+        translated.columns, ["weigth", "weight", "(箱)重量", "carton_weight"]
+    )
+    translated_units_col = find_column(
+        translated.columns, ["number of cartons", "箱入數", "units_per_carton"]
+    )
 
     translated = translated[
         [
@@ -505,8 +527,8 @@ def main():
     workspace_dir = script_dir.parents[1]
     fcgma_dir = find_existing_directory(
         [
+            workspace_dir.parent,
             workspace_dir,
-            workspace_dir / "fcgma",
             workspace_dir / "revision-fcgma-copy",
             workspace_dir / "revision-fcgma - Copy" / "rmfs-sku-allocation",
             workspace_dir.parent / "fcgma",
@@ -518,8 +540,8 @@ def main():
     preprocessing_dir = find_existing_directory(
         [
             fcgma_dir / "Preprocessing",
-            workspace_dir / "Preprocessing",
             workspace_dir.parent / "Preprocessing",
+            workspace_dir / "Preprocessing",
         ],
         required_files=["preprocessed_final.csv"],
     )

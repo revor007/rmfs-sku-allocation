@@ -22,10 +22,13 @@ from experiment_context import (
 BASE_DIR = Path(__file__).resolve().parent
 PREPROCESSING_DIR = find_preprocessing_dir(BASE_DIR)
 ORDER_FINAL_PATH = find_order_data_path(PREPROCESSING_DIR)
-MINIMUM_INVENTORY_PATH = BASE_DIR / "minimum_inventory.csv"
 SPLIT_ORDER_OUTPUT_PATH = PREPROCESSING_DIR / "inventory_threshold_split_orders.csv"
 SUMMARY_OUTPUT_PATH = PREPROCESSING_DIR / "inventory_threshold_split_summary.csv"
 DATA_CLEANING_SPLIT_SUMMARY_PATH = PREPROCESSING_DIR / "data_cleaning_split_summary.csv"
+PRODUCT_METADATA_CANDIDATES = [
+    PREPROCESSING_DIR / "preprocessed_final_latest.csv",
+    PREPROCESSING_DIR / "preprocessed_final.csv",
+]
 
 
 def derive_split_export_path(order_final_path: Path, suffix: str) -> Path:
@@ -66,6 +69,16 @@ def safe_console_text(value: object) -> str:
     return str(value).encode("ascii", "backslashreplace").decode("ascii")
 
 
+def find_product_metadata_path() -> Path:
+    for path in PRODUCT_METADATA_CANDIDATES:
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        "Could not locate preprocessed_final.csv. Searched: "
+        + ", ".join(str(path) for path in PRODUCT_METADATA_CANDIDATES)
+    )
+
+
 def main() -> None:
     cutoff_ratio = resolve_cutoff_ratio()
 
@@ -84,33 +97,33 @@ def main() -> None:
         errors="coerce",
     )
 
-    minimum_inventory = load_semicolon_csv(MINIMUM_INVENTORY_PATH).copy()
-    code_col = find_column(minimum_inventory.columns, ["item_code"])
-    ceiling_col = (
-        find_column(minimum_inventory.columns, ["minimum_inventory_ceiling"])
-        if "minimum_inventory_ceiling" in minimum_inventory.columns
-        else find_column(minimum_inventory.columns, ["minimum_inventory"])
+    product_metadata_path = find_product_metadata_path()
+    product_metadata = load_semicolon_csv(product_metadata_path).copy()
+    code_col = find_column(product_metadata.columns, ["item_code"])
+    ceiling_col = find_column(
+        product_metadata.columns,
+        ["inventory_quantity", "庫存量", "庫存量 (Inventory Quantity)"],
     )
-    minimum_inventory = minimum_inventory[[code_col, ceiling_col]].copy()
-    minimum_inventory.columns = ["item_code", "minimum_inventory_ceiling"]
-    minimum_inventory["item_code"] = minimum_inventory["item_code"].map(normalize_item_code)
-    minimum_inventory["minimum_inventory_ceiling"] = pd.to_numeric(
-        minimum_inventory["minimum_inventory_ceiling"], errors="coerce"
+    product_metadata = product_metadata[[code_col, ceiling_col]].copy()
+    product_metadata.columns = ["item_code", "inventory_quantity_ceiling"]
+    product_metadata["item_code"] = product_metadata["item_code"].map(normalize_item_code)
+    product_metadata["inventory_quantity_ceiling"] = pd.to_numeric(
+        product_metadata["inventory_quantity_ceiling"], errors="coerce"
     ).fillna(0).astype(int)
 
     threshold_by_sku = dict(
         zip(
-            minimum_inventory["item_code"],
-            minimum_inventory["minimum_inventory_ceiling"],
+            product_metadata["item_code"],
+            product_metadata["inventory_quantity_ceiling"],
         )
     )
 
-    order_df["_minimum_inventory_ceiling"] = (
+    order_df["_inventory_quantity_ceiling"] = (
         order_df["_item_code"].map(threshold_by_sku).fillna(-1).astype(int)
     )
     order_df["_exceeds_inventory_threshold"] = (
-        (order_df["_minimum_inventory_ceiling"] >= 0)
-        & (order_df["_quantity"] > order_df["_minimum_inventory_ceiling"])
+        (order_df["_inventory_quantity_ceiling"] >= 0)
+        & (order_df["_quantity"] > order_df["_inventory_quantity_ceiling"])
     )
 
     flagged_lines = order_df[order_df["_exceeds_inventory_threshold"]].copy()
@@ -124,7 +137,7 @@ def main() -> None:
         "_item_code",
         "_quantity",
         "_created_at",
-        "_minimum_inventory_ceiling",
+        "_inventory_quantity_ceiling",
         "_exceeds_inventory_threshold",
     ]
 
@@ -189,7 +202,7 @@ def main() -> None:
     )
     print(
         "Orders rerouted to split-order handling because at least one line exceeded "
-        f"the current minimum inventory ceiling: {len(flagged_order_ids):,}"
+        f"the SKU inventory quantity ceiling: {len(flagged_order_ids):,}"
     )
 
 
