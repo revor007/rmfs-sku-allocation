@@ -5,6 +5,51 @@ import pandas as pd
 
 from experiment_context import find_column, load_experiment_context, normalize_item_code
 
+INVENTORY_QUANTITY_CANDIDATES = [
+    "inventory_quantity",
+    "庫存量",
+    "庫存量 (Inventory Quantity)",
+]
+
+
+def load_storage_quantity_frame(path_hint):
+    hint = Path(path_hint).resolve()
+    candidate_paths = [
+        hint,
+        hint.parent / "Preprocessing" / "preprocessed_final_latest.csv",
+        hint.parent / "Preprocessing" / "preprocessed_final.csv",
+        hint.parent / "preprocessed_final_latest.csv",
+        hint.parent / "preprocessed_final.csv",
+        hint.parent.parent / "Preprocessing" / "preprocessed_final_latest.csv",
+        hint.parent.parent / "Preprocessing" / "preprocessed_final.csv",
+    ]
+
+    seen = set()
+    searched = []
+    for candidate in candidate_paths:
+        candidate = candidate.resolve()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        searched.append(candidate)
+        if not candidate.exists():
+            continue
+
+        df = pd.read_csv(candidate, sep=";", decimal=",", engine="python")
+        code_col = find_column(df.columns, ["item_code", "Item Code"])
+        try:
+            value_col = find_column(df.columns, INVENTORY_QUANTITY_CANDIDATES)
+        except KeyError:
+            continue
+
+        df[code_col] = df[code_col].map(normalize_item_code)
+        return df.set_index(code_col), value_col, candidate
+
+    raise FileNotFoundError(
+        "Could not locate a storage quantity source with inventory quantity. Searched: "
+        + ", ".join(str(path) for path in searched)
+    )
+
 
 def allocate_random_new_products(random_new_indices, stage_required_slots, p, g, G, random_seed):
     random_new_indices = np.asarray(random_new_indices, dtype=np.int32)
@@ -123,7 +168,7 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
     # not the leader SKU's demand level.
     effective_g = np.asarray(g, dtype=np.int32).copy()
 
-    # Use each SKU's raw minimum-inventory slot demand directly.
+    # Use each SKU's raw storage-quantity slot demand directly.
     # Random-new products no longer inherit a historical average slot floor.
     stage_required_slots = np.ceil(effective_g / p).astype(np.int32)
     historical_slots = stage_required_slots[np.asarray(historical_indices, dtype=np.int32)]
@@ -222,14 +267,7 @@ def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, ra
     U_df.index = U_df.index.map(normalize_item_code)
     U_df.columns = U_df.columns.map(normalize_item_code)
 
-    g_df = pd.read_csv(path_min_inv, sep=";", decimal=",", engine="python")
-    
-    g_code_col = find_column(g_df.columns, ["item_code"])
-    g_value_col = find_column(g_df.columns, ["minimum_inventory"])
-    g_df[g_code_col] = g_df[g_code_col].map(normalize_item_code)
-    g_df = g_df.set_index(g_code_col)
-    if g_value_col not in g_df.columns:
-        raise KeyError("Column 'minimum_inventory' was not found in minimum inventory file.")
+    g_df, g_value_col, g_source_path = load_storage_quantity_frame(path_min_inv)
 
     p_df = pd.read_csv(path_max_cap, sep=None, engine="python")
     p_code_col = find_column(p_df.columns, ["item_code"])
@@ -248,7 +286,7 @@ def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, ra
     )
     if not common_skus:
         raise ValueError(
-            "No common SKUs were found across U, minimum inventory, max capacity, "
+            "No common SKUs were found across U, storage quantity, max capacity, "
             "and the cutoff-aligned eligible SKU universe."
         )
 
@@ -257,7 +295,13 @@ def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, ra
     p_df = p_df.reindex(index=common_skus)
 
     U = U_df.to_numpy(dtype=np.float32)
-    g = np.ceil(g_df[g_value_col].to_numpy()).astype(np.int32)
+    g_values = pd.to_numeric(g_df[g_value_col], errors="coerce")
+    if g_values.isna().any():
+        missing = int(g_values.isna().sum())
+        raise ValueError(
+            f"Storage quantity source '{g_source_path}' contains {missing} invalid inventory quantity values."
+        )
+    g = np.ceil(g_values.to_numpy()).astype(np.int32)
     p = np.floor(pd.to_numeric(p_df[p_value_col], errors="coerce").to_numpy()).astype(np.int32)
 
     if np.any(p <= 0):

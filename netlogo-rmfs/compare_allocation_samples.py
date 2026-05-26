@@ -342,8 +342,6 @@ def run_experiment_capped(
     throughput_per_hour = (
         warehouse.orders_fulfilled / elapsed_hours if elapsed_hours > 0 else 0.0
     )
-    delivered_order_lines = int(getattr(warehouse, "delivered_order_lines", 0))
-    pod_visits = int(warehouse.pod_visit_to_station)
 
     summary = pd.DataFrame(
         [
@@ -386,12 +384,7 @@ def run_experiment_capped(
             {"metric": "total_turning", "value": float(warehouse.total_turning)},
             {"metric": "replenishment_count", "value": int(warehouse.replenishment_count)},
             {"metric": "replenishment_trips", "value": int(warehouse.replenishment_trips)},
-            {"metric": "pod_visit_to_station", "value": pod_visits},
-            {"metric": "delivered_order_lines", "value": delivered_order_lines},
-            {
-                "metric": "delivered_order_lines_per_pod_visit",
-                "value": (delivered_order_lines / pod_visits) if pod_visits > 0 else 0.0,
-            },
+            {"metric": "pod_visit_to_station", "value": int(warehouse.pod_visit_to_station)},
             {"metric": "average_inventory_level", "value": float(warehouse.average_inventory_level)},
             {"metric": "average_pod_inventory_level", "value": float(warehouse.average_pod_inventory_level)},
             {
@@ -625,10 +618,6 @@ def main():
                 "stop_and_go": summary.get("stop_and_go", 0),
                 "replenishment_trips": summary.get("replenishment_trips", 0),
                 "pod_visit_to_station": summary.get("pod_visit_to_station", 0),
-                "delivered_order_lines": summary.get("delivered_order_lines", 0),
-                "delivered_order_lines_per_pod_visit": summary.get(
-                    "delivered_order_lines_per_pod_visit", 0.0
-                ),
                 "average_pile_on": average_pile_on,
                 "average_inventory_level": summary.get("average_inventory_level", 0.0),
                 "average_pod_inventory_level": summary.get("average_pod_inventory_level", 0.0),
