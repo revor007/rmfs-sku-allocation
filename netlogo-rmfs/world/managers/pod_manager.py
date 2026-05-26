@@ -217,20 +217,56 @@ class PodManager:
 
         # pod.addSKU(sku, limit_qty, current_qty, item_weight)
 
+    @staticmethod
+    def _parse_threshold_value(raw_value):
+        try:
+            return float(str(raw_value).replace(",", "."))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _resolve_global_reorder_point_qty(threshold_value: float, max_global_qty: int) -> int:
+        if threshold_value <= 1.0:
+            return int(max(0, np.ceil(max_global_qty * threshold_value)))
+        return int(max(0, np.ceil(threshold_value)))
+
     def addSKUData(self,sku,current_qty,max_qty,global_threshold_inv_level):
         sku_id = sku
+        threshold_value = self._parse_threshold_value(global_threshold_inv_level)
 
         if sku_id not in self.skus_data:
+            reorder_point_qty = self._resolve_global_reorder_point_qty(threshold_value, max_qty)
             self.skus_data[sku_id] = {
                 'current_global_qty': current_qty,
                 'max_global_qty': max_qty,
-                'global_inv_level': (current_qty / max_qty),
-                'global_threshold_inv_level' : global_threshold_inv_level
+                'global_inv_level': (current_qty / max_qty) if max_qty > 0 else 0,
+                'global_threshold_inv_level': threshold_value,
+                'global_reorder_point_qty': reorder_point_qty,
             }
         else:
             self.skus_data[sku_id]['current_global_qty'] += current_qty
             self.skus_data[sku_id]['max_global_qty'] += max_qty
-            self.skus_data[sku_id]['global_inv_level'] = self.skus_data[sku_id]['current_global_qty'] / self.skus_data[sku_id]['max_global_qty']
+            if self.skus_data[sku_id]['max_global_qty'] > 0:
+                self.skus_data[sku_id]['global_inv_level'] = (
+                    self.skus_data[sku_id]['current_global_qty']
+                    / self.skus_data[sku_id]['max_global_qty']
+                )
+            else:
+                self.skus_data[sku_id]['global_inv_level'] = 0
+
+            if threshold_value <= 1.0:
+                self.skus_data[sku_id]['global_reorder_point_qty'] = (
+                    self._resolve_global_reorder_point_qty(
+                        threshold_value,
+                        self.skus_data[sku_id]['max_global_qty'],
+                    )
+                )
+            else:
+                self.skus_data[sku_id]['global_reorder_point_qty'] = max(
+                    int(self.skus_data[sku_id].get('global_reorder_point_qty', 0)),
+                    self._resolve_global_reorder_point_qty(threshold_value, max_qty),
+                )
+            self.skus_data[sku_id]['global_threshold_inv_level'] = threshold_value
 
     def reduceSKUDataForPod(self, sku, quantity, pod_id):
         """Reduce the quantity of a SKU for a specific pod and update global skus_data accordingly, never going below zero. Returns the actual reduced amount."""
@@ -275,12 +311,21 @@ class PodManager:
             )
         else:
             sku_data['global_inv_level'] = 0
+
+    def getSKUReorderPointQty(self, sku_id):
+        sku_data = self.skus_data.get(sku_id)
+        if sku_data is None:
+            return 0
+        return int(sku_data.get('global_reorder_point_qty', 0))
     
     def isSKUNeedReplenishment(self, sku_id):
-        if float(self.skus_data[sku_id]['global_inv_level']) <= float(self.skus_data[sku_id]['global_threshold_inv_level']):
-            return sku_id, True
-        else:
+        sku_data = self.skus_data.get(sku_id)
+        if sku_data is None:
             return sku_id, False
+
+        reorder_point_qty = float(sku_data.get('global_reorder_point_qty', 0))
+        current_global_qty = float(sku_data.get('current_global_qty', 0))
+        return sku_id, current_global_qty <= reorder_point_qty
 
     def updateGlobalInventory(self, sku, reduced_quantity):
         """Update global inventory tracking after pod-level reduction"""
