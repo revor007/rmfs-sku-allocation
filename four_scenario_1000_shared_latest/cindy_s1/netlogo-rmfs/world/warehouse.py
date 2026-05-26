@@ -551,6 +551,7 @@ class Warehouse:
         pod: Pod = job.pod
         sku_need_replenished = []
         self._release_job_active_quantities(job)
+        file_path = PARENT_DIRECTORY + "/data/input/assign_order.csv"
         for order_id, sku, quantity in job.orders:
             order: Order = self.order_manager.getOrderById(order_id)
             actual_picked = pod.pickSKU(sku, quantity)
@@ -576,6 +577,24 @@ class Warehouse:
 
             # SKU Replenished Triggered
             if(replenished_status == True): sku_need_replenished.append(sku)
+
+            sku_remaining = order.getQuantityLeftForSKU(sku)
+            line_status = 1 if sku_remaining <= 0 else 0
+            self.assign_order_df.loc[
+                ((self.assign_order_df['order_id'] == order.id) & (self.assign_order_df['item_id'] == sku)),
+                'status'
+            ] = line_status
+            if self.persist_assign_order_csv:
+                self.assign_order_df.to_csv(file_path, index=False)
+            self.updated_assigned_order = True
+
+            if order.isOrderCompleted():
+                self.order_manager.finishOrder(order_id, int(self._tick))
+                station = self.station_manager.getStationById(order.station_id)
+                if station is not None:
+                    station.removeOrder(order_id, order)
+                self.insertFinishedOrderToCSV(order)
+                self.orders_fulfilled += 1
 
         if sku_need_replenished:
             self.global_critical_skus.update(sku_need_replenished)
@@ -607,25 +626,6 @@ class Warehouse:
     #         actual_picked = pod.pickSKU(sku, quantity)  # Let pod handle its own inventory
     #         self.pod_manager.updateGlobalInventory(sku, actual_picked)  # Update global tracking
     #         order.deliverQuantity(sku, actual_picked)  # Only deliver what was actually picked
-
-            file_path = PARENT_DIRECTORY + "/data/input/assign_order.csv"
-            # assign_order_df = pd.read_csv(file_path)
-            sku_remaining = order.getQuantityLeftForSKU(sku)
-            line_status = 1 if sku_remaining <= 0 else 0
-            self.assign_order_df.loc[
-                ((self.assign_order_df['order_id'] == order.id) & (self.assign_order_df['item_id'] == sku)),
-                'status'
-            ] = line_status
-            if self.persist_assign_order_csv:
-                self.assign_order_df.to_csv(file_path, index=False)
-            self.updated_assigned_order = True
-            
-            if order.isOrderCompleted():
-                self.order_manager.finishOrder(order_id, int(self._tick))
-                station = self.station_manager.getStationById(self.assign_order_df.loc[self.assign_order_df['order_id'] == order.id, 'assigned_station'].values[0])
-                station.removeOrder(order_id,order)
-                self.insertFinishedOrderToCSV(order)
-                self.orders_fulfilled += 1  # Increment order fulfillment count
 
         # # TRACY
         # # Get pod that have SKU that need to be replenished
@@ -772,6 +772,9 @@ class Warehouse:
         if order is None or order.isOrderCompleted():
             return False
 
+        if order.station_id is None:
+            order.is_in_queue = False
+
         active_job_quantities = self.getActiveJobQuantitiesForOrder(order.id)
         queued_quantities = self.getQueuedQuantitiesForOrder(order.id)
         repaired = False
@@ -793,7 +796,7 @@ class Warehouse:
             accounted_qty = active_committed_qty + queued_qty
             missing_qty = true_remaining_qty - accounted_qty
 
-            if missing_qty > 0:
+            if missing_qty > 0 and order.station_id is not None:
                 self._enqueue_sku_request(order.id, sku, missing_qty)
                 queued_quantities[sku] = queued_qty + missing_qty
                 order.is_in_queue = True
@@ -2007,12 +2010,18 @@ class Warehouse:
         
         # Simpan request yang pod-nya nggak ketemu/sibuk untuk ditaruh lagi di antrian
         unprocessed_requests = [] 
+        dropped_requests = []
 
         for request in self.sku_picking_queue:
             sku_id = request['sku']
             order = self.order_manager.getOrderById(request['order_id'])
-            if order is None or order.station_id is None:
-                unprocessed_requests.append(request)
+            if order is None:
+                dropped_requests.append(request)
+                continue
+
+            if order.station_id is None:
+                order.is_in_queue = False
+                dropped_requests.append(request)
                 continue
 
             order_station = self.station_manager.getStationById(order.station_id)
@@ -2121,6 +2130,10 @@ class Warehouse:
             (req.get("order_id"), req.get("sku"), req.get("qty", 0))
             for req in unprocessed_requests
         )
+        dropped_counter = Counter(
+            (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+            for req in dropped_requests
+        )
         remaining_requests = []
         for req in self.sku_picking_queue:
             key = (req.get("order_id"), req.get("sku"), req.get("qty", 0))
@@ -2129,6 +2142,9 @@ class Warehouse:
                 continue
             if unprocessed_counter.get(key, 0) > 0:
                 unprocessed_counter[key] -= 1
+                continue
+            if dropped_counter.get(key, 0) > 0:
+                dropped_counter[key] -= 1
                 continue
             remaining_requests.append(req)
 
