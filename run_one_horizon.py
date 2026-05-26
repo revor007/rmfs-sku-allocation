@@ -13,6 +13,15 @@ import pandas as pd
 
 CSV_SEPARATOR = os.environ.get("FULL_POSTT_CSV_SEPARATOR", ";")
 CSV_ENCODING = "utf-8-sig"
+PROGRESS_ENABLED = os.environ.get("FULL_POSTT_ENABLE_PROGRESS", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+PROGRESS_TICKS = max(1.0, float(os.environ.get("FULL_POSTT_PROGRESS_TICKS", "100")))
+PROGRESS_SECONDS = max(1.0, float(os.environ.get("FULL_POSTT_PROGRESS_SECONDS", "30")))
 
 
 def ensure_runtime_input_files(run_root: Path) -> None:
@@ -105,13 +114,40 @@ else:
 warehouse = sim.warehouse
 start = time.time()
 stopped_cleanly = False
+last_progress_tick = float(warehouse._tick)
+last_progress_time = start
+
+print(
+    f"[START] scenario={label} horizon_tick={horizon_tick:g} run_dir={run_dir}",
+    flush=True,
+)
 while float(warehouse._tick) < horizon_tick:
     warehouse.tick()
+    current_tick = float(warehouse._tick)
+    now = time.time()
+    if PROGRESS_ENABLED and (
+        (current_tick - last_progress_tick) >= PROGRESS_TICKS
+        or (now - last_progress_time) >= PROGRESS_SECONDS
+    ):
+        elapsed_now = now - start
+        print(
+            "[PROGRESS] "
+            f"scenario={label} "
+            f"tick={current_tick:.2f}/{horizon_tick:.2f} "
+            f"step={int(warehouse._step)} "
+            f"elapsed_s={elapsed_now:.1f}",
+            flush=True,
+        )
+        last_progress_tick = current_tick
+        last_progress_time = now
     if warehouse.isSimulationComplete():
         stopped_cleanly = True
         break
 elapsed = time.time() - start
-if hasattr(warehouse, "refreshSimulationHealth"):
+if (
+    hasattr(warehouse, "refreshSimulationHealth")
+    and int(getattr(warehouse, "health_check_interval", 0)) > 0
+):
     warehouse.refreshSimulationHealth(force_log=True)
 on_hold = int(
     sum(1 for o in warehouse.order_manager.unfinished_orders if getattr(o, "on_hold", False))
@@ -190,4 +226,15 @@ result = pd.DataFrame(
     ]
 )
 result.to_csv(output_csv, index=False, sep=CSV_SEPARATOR, encoding=CSV_ENCODING)
+print(
+    "[DONE] "
+    f"scenario={label} "
+    f"tick={float(warehouse._tick):.2f} "
+    f"step={int(warehouse._step)} "
+    f"elapsed_s={elapsed:.1f} "
+    f"fulfilled={fulfilled} "
+    f"arrived={arrived} "
+    f"output={output_csv}",
+    flush=True,
+)
 devnull.close()

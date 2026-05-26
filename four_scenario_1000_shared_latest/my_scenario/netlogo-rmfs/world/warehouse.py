@@ -118,8 +118,12 @@ class Warehouse:
         self.replenishment_dispatch_aging_ticks = int(
             os.getenv("RMFS_REPLENISHMENT_AGING_TICKS", "300")
         )
-        self.health_check_interval = int(os.getenv("RMFS_HEALTH_CHECK_INTERVAL", "100"))
+        self.health_check_interval = int(os.getenv("RMFS_HEALTH_CHECK_INTERVAL", "0"))
         self.health_stall_ticks = int(os.getenv("RMFS_HEALTH_STALL_TICKS", "600"))
+        self.persist_assign_order_csv = os.getenv(
+            "RMFS_PERSIST_ASSIGN_ORDER_CSV",
+            "0",
+        ).strip().lower() in {"1", "true", "yes", "y", "on"}
         self.last_health_check_tick = -1
         self.health_status = "healthy"
         self.last_health_status = "healthy"
@@ -548,7 +552,8 @@ class Warehouse:
                 ((self.assign_order_df['order_id'] == order.id) & (self.assign_order_df['item_id'] == sku)),
                 'status'
             ] = line_status
-            self.assign_order_df.to_csv(file_path, index=False)
+            if self.persist_assign_order_csv:
+                self.assign_order_df.to_csv(file_path, index=False)
             self.updated_assigned_order = True
             
             if order.isOrderCompleted():
@@ -2124,18 +2129,18 @@ class Warehouse:
             
     def update_global_sku_watchlist(self):
         """
-        Rebuild the global watchlist from absolute reorder-point metadata.
+        Rebuild the global watchlist from warehouse inventory ratio metadata.
         """
         self.global_critical_skus = set()
         all_skus_data = self.pod_manager.getAllSKUData()
 
         for sku_id, data in all_skus_data.items():
-            reorder_point_qty = int(data.get("global_reorder_point_qty", 0))
-            if reorder_point_qty <= 0:
+            threshold_ratio = float(data.get("global_threshold_inv_level", 0))
+            if threshold_ratio <= 0:
                 continue
 
-            current_global_qty = int(data.get("current_global_qty", 0))
-            if current_global_qty <= reorder_point_qty:
+            current_global_ratio = float(data.get("global_inv_level", 0))
+            if current_global_ratio <= threshold_ratio:
                 self.global_critical_skus.add(sku_id)
 
     def get_pod_average_fill_score(self, pod: Pod) -> float:
