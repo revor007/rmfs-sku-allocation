@@ -12,7 +12,6 @@ from world.layout import Layout
 
 
 POD_THRESHOLD = 0.4
-GLOBAL_THRESHOLD = 0.4
 POD_TYPE = 4
 SLOT_TYPE = 3
 DEFAULT_SLOT_CAPACITY = 40
@@ -73,6 +72,33 @@ def find_column(columns, candidates):
 
 def load_semicolon_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, sep=";", decimal=",", encoding="utf-8-sig", engine="python")
+
+
+def load_reorder_points(path: Path) -> pd.DataFrame:
+    reorder_df = load_semicolon_csv(path)
+    code_col = find_column(reorder_df.columns, ["item_code"])
+    reorder_col = find_column(
+        reorder_df.columns,
+        ["minimum_inventory_ceiling", "minimum_inventory", "reorder_point", "reorder_point_pcs"],
+    )
+
+    reorder_df = reorder_df[[code_col, reorder_col]].copy()
+    reorder_df.columns = ["item_code", "item_warehouse_reorder_point"]
+    reorder_df["item_code"] = reorder_df["item_code"].map(normalize_item_code)
+    reorder_df["item_warehouse_reorder_point"] = pd.to_numeric(
+        reorder_df["item_warehouse_reorder_point"], errors="coerce"
+    )
+
+    if reorder_df["item_warehouse_reorder_point"].isna().any():
+        missing = int(reorder_df["item_warehouse_reorder_point"].isna().sum())
+        raise ValueError(
+            f"Minimum inventory source {path} contains {missing} invalid reorder-point values."
+        )
+
+    reorder_df["item_warehouse_reorder_point"] = (
+        reorder_df["item_warehouse_reorder_point"].clip(lower=0).round().astype(np.int32)
+    )
+    return reorder_df
 
 
 def find_existing_directory(candidates: list[Path], required_files: list[str]) -> Path:
@@ -180,6 +206,7 @@ def prepare_inputs(
     metadata_path: Path,
     translated_info_path: Path,
     max_comp_path: Path,
+    minimum_inventory_path: Path | None = None,
     order_path: Path | None = None,
     cutoff_ratio: float | None = None,
     required_coverage_skus: set[str] | None = None,
@@ -193,12 +220,16 @@ def prepare_inputs(
     train_orders = context.train_eligible_df.copy()
     test_orders = context.test_eligible_df.copy()
 
+    if minimum_inventory_path is None:
+        minimum_inventory_path = FCGMA_DIR / "minimum_inventory.csv"
+
     metadata = load_semicolon_csv(metadata_path)
     metadata_code_col = find_column(metadata.columns, ["item_code"])
     metadata_title_col = find_column(metadata.columns, ["title"])
     metadata = metadata[[metadata_code_col, metadata_title_col]].copy()
     metadata.columns = ["item_code", "item_name_meta"]
     metadata["item_code"] = metadata["item_code"].map(normalize_item_code)
+    reorder_points = load_reorder_points(minimum_inventory_path)
 
     translated = load_semicolon_csv(translated_info_path)
     translated_code_col = find_column(translated.columns, ["item code", "item_code"])
@@ -319,6 +350,7 @@ def prepare_inputs(
         item_master["item_code"].map(allocated_quantity).fillna(0).astype(np.int32)
     )
     item_master = item_master.merge(metadata, on="item_code", how="left")
+    item_master = item_master.merge(reorder_points, on="item_code", how="left")
     item_master = item_master.merge(translated, on="item_code", how="left")
     item_master = item_master.merge(max_comp, on="item_code", how="left")
 
@@ -359,6 +391,14 @@ def prepare_inputs(
             f"Examples: {preview}"
         )
 
+    missing_reorder = item_master[item_master["item_warehouse_reorder_point"].isna()]
+    if not missing_reorder.empty:
+        preview = ", ".join(missing_reorder["item_code"].head(10))
+        raise ValueError(
+            "Some allocated SKUs are missing absolute reorder-point data from minimum_inventory.csv. "
+            f"Examples: {preview}"
+        )
+
     item_master["box_volume"] = (
         item_master["box_length"] * item_master["box_width"] * item_master["box_height"]
     )
@@ -370,7 +410,9 @@ def prepare_inputs(
     )
     item_master["item_unit"] = "PCS"
     item_master["item_pod_inventory_level"] = POD_THRESHOLD
-    item_master["item_warehouse_inventory_level"] = GLOBAL_THRESHOLD
+    item_master["item_warehouse_inventory_level"] = (
+        item_master["item_warehouse_reorder_point"].astype(np.int32)
+    )
     item_master["max_fit"] = item_master["max_fit"].round().astype(np.int32)
     item_master["item_id"] = np.arange(len(item_master), dtype=np.int32)
     item_master["item_code_numeric"] = pd.to_numeric(item_master["item_code"], errors="raise").astype(np.int64)
@@ -418,6 +460,9 @@ def prepare_inputs(
 
     code_to_id = dict(zip(item_master["item_code"], item_master["item_id"]))
     code_to_weight = dict(zip(item_master["item_code"], item_master["item_weight"]))
+    code_to_reorder_point = dict(
+        zip(item_master["item_code"], item_master["item_warehouse_inventory_level"])
+    )
 
     pods_output = allocation.copy()
     pods_output["pod_id"] = pods_output["pod"] - 1
@@ -435,7 +480,9 @@ def prepare_inputs(
     pods_output["item_weight"] = pods_output["item_code"].map(code_to_weight).astype(float).round(6)
     pods_output["total_item_weight"] = (pods_output["item_weight"] * pods_output["qty"]).round(6)
     pods_output["item_pod_inventory_level"] = POD_THRESHOLD
-    pods_output["item_warehouse_inventory_level"] = GLOBAL_THRESHOLD
+    pods_output["item_warehouse_inventory_level"] = (
+        pods_output["item_code"].map(code_to_reorder_point).astype(np.int32)
+    )
 
     pods_output = pods_output[
         [
@@ -580,6 +627,12 @@ def main():
         help="Path to the slot-capacity-by-SKU CSV.",
     )
     parser.add_argument(
+        "--minimum-inventory",
+        type=Path,
+        default=fcgma_dir / "minimum_inventory.csv",
+        help="Path to the absolute reorder-point CSV.",
+    )
+    parser.add_argument(
         "--cutoff-ratio",
         type=float,
         default=None,
@@ -594,6 +647,7 @@ def main():
         metadata_path=args.metadata,
         translated_info_path=args.translated_info,
         max_comp_path=args.max_comp,
+        minimum_inventory_path=args.minimum_inventory,
         cutoff_ratio=args.cutoff_ratio,
     )
 
