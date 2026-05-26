@@ -323,9 +323,9 @@ class PodManager:
         if sku_data is None:
             return sku_id, False
 
-        reorder_point_qty = float(sku_data.get('global_reorder_point_qty', 0))
-        current_global_qty = float(sku_data.get('current_global_qty', 0))
-        return sku_id, current_global_qty <= reorder_point_qty
+        global_threshold_inv_level = float(sku_data.get('global_threshold_inv_level', 0))
+        current_global_ratio = float(sku_data.get('global_inv_level', 0))
+        return sku_id, current_global_ratio <= global_threshold_inv_level
 
     def updateGlobalInventory(self, sku, reduced_quantity):
         """Update global inventory tracking after pod-level reduction"""

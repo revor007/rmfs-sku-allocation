@@ -5,50 +5,34 @@ import pandas as pd
 
 from experiment_context import find_column, load_experiment_context, normalize_item_code
 
-INVENTORY_QUANTITY_CANDIDATES = [
-    "inventory_quantity",
-    "庫存量",
-    "庫存量 (Inventory Quantity)",
+
+MINIMUM_INVENTORY_CANDIDATES = [
+    "minimum_inventory_ceiling",
+    "minimum_inventory",
+    "reorder_point",
+    "reorder_point_pcs",
 ]
 
 
-def load_storage_quantity_frame(path_hint):
-    hint = Path(path_hint).resolve()
-    candidate_paths = [
-        hint,
-        hint.parent / "Preprocessing" / "preprocessed_final_latest.csv",
-        hint.parent / "Preprocessing" / "preprocessed_final.csv",
-        hint.parent / "preprocessed_final_latest.csv",
-        hint.parent / "preprocessed_final.csv",
-        hint.parent.parent / "Preprocessing" / "preprocessed_final_latest.csv",
-        hint.parent.parent / "Preprocessing" / "preprocessed_final.csv",
-    ]
+def load_minimum_inventory_frame(path_hint):
+    path = Path(path_hint).resolve()
+    candidates = [path]
+    latest_path = path.with_name(f"{path.stem}_latest{path.suffix}")
+    if latest_path != path:
+        candidates.append(latest_path)
 
-    seen = set()
-    searched = []
-    for candidate in candidate_paths:
-        candidate = candidate.resolve()
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        searched.append(candidate)
-        if not candidate.exists():
-            continue
+    existing = [candidate for candidate in candidates if candidate.exists()]
+    if not existing:
+        searched = ", ".join(str(candidate) for candidate in candidates)
+        raise FileNotFoundError(f"Minimum inventory source not found. Searched: {searched}")
 
-        df = pd.read_csv(candidate, sep=";", decimal=",", engine="python")
-        code_col = find_column(df.columns, ["item_code", "Item Code"])
-        try:
-            value_col = find_column(df.columns, INVENTORY_QUANTITY_CANDIDATES)
-        except KeyError:
-            continue
+    path = max(existing, key=lambda candidate: (candidate.stat().st_mtime, candidate.name))
 
-        df[code_col] = df[code_col].map(normalize_item_code)
-        return df.set_index(code_col), value_col, candidate
-
-    raise FileNotFoundError(
-        "Could not locate a storage quantity source with inventory quantity. Searched: "
-        + ", ".join(str(path) for path in searched)
-    )
+    df = pd.read_csv(path, sep=";", decimal=",", engine="python")
+    code_col = find_column(df.columns, ["item_code", "Item Code"])
+    value_col = find_column(df.columns, MINIMUM_INVENTORY_CANDIDATES)
+    df[code_col] = df[code_col].map(normalize_item_code)
+    return df.set_index(code_col), value_col, path
 
 
 def allocate_random_new_products(random_new_indices, stage_required_slots, p, g, G, random_seed):
@@ -136,7 +120,11 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
 
         for row in bc_df.itertuples(index=False):
             new_idx = sku_to_idx.get(row.new_product_code)
-            hist_idx = sku_to_idx.get(row.corresponding_historical_product) if row.corresponding_historical_product else None
+            hist_idx = (
+                sku_to_idx.get(row.corresponding_historical_product)
+                if row.corresponding_historical_product
+                else None
+            )
             if new_idx is None:
                 continue
 
@@ -164,15 +152,12 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
         set(range(PN)) - set(random_new_indices) - set(common_new_indices)
     )
 
-    # Keep each SKU's own target quantity; common allocation shares placement,
-    # not the leader SKU's demand level.
     effective_g = np.asarray(g, dtype=np.int32).copy()
-
-    # Use each SKU's raw storage-quantity slot demand directly.
-    # Random-new products no longer inherit a historical average slot floor.
     stage_required_slots = np.ceil(effective_g / p).astype(np.int32)
     historical_slots = stage_required_slots[np.asarray(historical_indices, dtype=np.int32)]
-    average_historical_slots = int(max(1, np.ceil(historical_slots.mean()))) if historical_slots.size else 1
+    average_historical_slots = (
+        int(max(1, np.ceil(historical_slots.mean()))) if historical_slots.size else 1
+    )
 
     common_group_members = {}
     common_group_leaders = sorted(common_groups)
@@ -212,7 +197,9 @@ def build_stage_allocation_metadata(sku_codes, g, p, G_scalar, path_stage1=None,
         key=lambda entity: (-entity["total_load"], -entity["member_count"], entity["leader_idx"])
     )
 
-    total_required_slots = int(stage_required_slots[np.asarray(random_new_indices, dtype=np.int32)].sum())
+    total_required_slots = int(
+        stage_required_slots[np.asarray(random_new_indices, dtype=np.int32)].sum()
+    )
     total_required_slots += int(sum(entity["total_load"] for entity in stage2_entities))
     M = max(1, int(np.ceil(total_required_slots / G_scalar)))
     G = np.full(M, G_scalar, dtype=np.int32)
@@ -267,7 +254,7 @@ def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, ra
     U_df.index = U_df.index.map(normalize_item_code)
     U_df.columns = U_df.columns.map(normalize_item_code)
 
-    g_df, g_value_col, g_source_path = load_storage_quantity_frame(path_min_inv)
+    g_df, g_value_col, g_source_path = load_minimum_inventory_frame(path_min_inv)
 
     p_df = pd.read_csv(path_max_cap, sep=None, engine="python")
     p_code_col = find_column(p_df.columns, ["item_code"])
@@ -286,7 +273,7 @@ def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, ra
     )
     if not common_skus:
         raise ValueError(
-            "No common SKUs were found across U, storage quantity, max capacity, "
+            "No common SKUs were found across U, minimum inventory, max capacity, "
             "and the cutoff-aligned eligible SKU universe."
         )
 
@@ -299,7 +286,7 @@ def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, ra
     if g_values.isna().any():
         missing = int(g_values.isna().sum())
         raise ValueError(
-            f"Storage quantity source '{g_source_path}' contains {missing} invalid inventory quantity values."
+            f"Minimum inventory source '{g_source_path}' contains {missing} invalid values."
         )
     g = np.ceil(g_values.to_numpy()).astype(np.int32)
     p = np.floor(pd.to_numeric(p_df[p_value_col], errors="coerce").to_numpy()).astype(np.int32)
