@@ -120,65 +120,68 @@ class PodManager:
             return assigned_pod
     
     def getAvailablePodInventory(self, sku: str, skus_in_station_dict, station_coordinate, robots_coordinate):
-        sku_in_station_list = [i for i in skus_in_station_dict]
-        pod_available_for_multiple_items = pd.DataFrame(columns=["pod_id", "similarity_score", "inventory_score","distance_to_station","distance_to_robot"])
-        
+        sku_in_station_list = list(skus_in_station_dict)
         station_coordinate = [station_coordinate.x, station_coordinate.y]
-        # print("THE SKU ", sku)
-        # print(skus_in_station_dict)
-        if sku in self.sku_to_pods:
-            # a = self.sku_to_pods[sku]
-            # print("len of available pod ", len(a))
-            for pod in self.sku_to_pods[sku]:
-                similarity_score = 0
+        if sku not in self.sku_to_pods:
+            return
 
-                if (
-                    pod.is_idle is True
-                    and not pod.is_awaiting_replenishment
-                    and not pod.must_replenish_before_pick
-                ):
-                    # Similarity
-                    pod_skus = [i for i in pod.skus]
-                    pod_skus_in_station_skus_mask = np.isin(sku_in_station_list, pod_skus)
-                  
-                    pod_skus_in_station_skus = np.array(sku_in_station_list)[pod_skus_in_station_skus_mask]
-                    
-                    if len(pod_skus_in_station_skus) > 0:
-                        for skus in pod_skus_in_station_skus:
-                            skus_qty_in_pod = pod.getQuantity(skus)
-                            if skus_qty_in_pod > 0:
-                                similarity_score += 1
-                    
-                    pod_coordinate = [pod.coordinate.x, pod.coordinate.y]
-                    # D1
-                    distance_to_station = manhattan_distances([pod_coordinate],[station_coordinate])[0][0]
-                    # D2
-                    distance_to_robot = self._distancePodToRobot(pod_coordinate, robots_coordinate)
-                    # distance_to_robot = 1
-                    # Inventory Score
-                    # print("sku in dict, gabisa keknya")
-                    # print(skus_in_station_dict)
-                    inventory_score = self._countFulfillment(skus_in_station_dict, pod.skus)
-                    # inventory_score = 1
-                    pod_available_for_multiple_items = pd.concat([pod_available_for_multiple_items, 
-                                                                pd.DataFrame([[pod.pod_number, similarity_score,inventory_score, distance_to_station, distance_to_robot]], 
-                                                                                                            columns=["pod_id", "similarity_score", "inventory_score","distance_to_station","distance_to_robot"])], ignore_index=True) 
-            
-            pod_available_for_multiple_items["station_distance_score"] = pod_available_for_multiple_items["distance_to_station"].max() - pod_available_for_multiple_items["distance_to_station"]
-            pod_available_for_multiple_items["cost"] = (pod_available_for_multiple_items["station_distance_score"] + pod_available_for_multiple_items["distance_to_robot"]) * pod_available_for_multiple_items["similarity_score"] * (len(sku_in_station_list) / pod_available_for_multiple_items["inventory_score"]) 
-            pod_available_for_multiple_items.sort_values(by=["cost"], ascending=[True], inplace=True)
-            pod_available_for_multiple_items.reset_index(drop=True, inplace=True)
-            pod_available_for_multiple_items = pod_available_for_multiple_items[pod_available_for_multiple_items["similarity_score"] > 0]
+        candidates = []
+        max_distance_to_station = None
+        for pod in self.sku_to_pods[sku]:
+            if (
+                pod.is_idle is not True
+                or pod.is_awaiting_replenishment
+                or pod.must_replenish_before_pick
+            ):
+                continue
 
-            assigned_pod = None
-            if len(pod_available_for_multiple_items) > 0:
-                assigned_pod_id = pod_available_for_multiple_items.iloc[0]["pod_id"]
-           
-                assigned_pod = self.getPodByNumber(assigned_pod_id)
-        
-            return assigned_pod
+            similarity_score = 0
+            for station_sku in sku_in_station_list:
+                if station_sku in pod.skus and pod.getQuantity(station_sku) > 0:
+                    similarity_score += 1
 
-        return
+            pod_coordinate = [pod.coordinate.x, pod.coordinate.y]
+            distance_to_station = abs(pod_coordinate[0] - station_coordinate[0]) + abs(
+                pod_coordinate[1] - station_coordinate[1]
+            )
+            distance_to_robot = self._distancePodToRobot(pod_coordinate, robots_coordinate)
+            inventory_score = self._countFulfillment(skus_in_station_dict, pod.skus)
+
+            if max_distance_to_station is None or distance_to_station > max_distance_to_station:
+                max_distance_to_station = distance_to_station
+
+            candidates.append(
+                (
+                    pod,
+                    similarity_score,
+                    inventory_score,
+                    distance_to_station,
+                    distance_to_robot,
+                )
+            )
+
+        if not candidates:
+            return
+
+        if max_distance_to_station is None:
+            max_distance_to_station = 0
+
+        best_pod = None
+        best_cost = None
+        station_sku_count = len(sku_in_station_list)
+        for pod, similarity_score, inventory_score, distance_to_station, distance_to_robot in candidates:
+            if similarity_score <= 0 or inventory_score <= 0:
+                continue
+
+            station_distance_score = max_distance_to_station - distance_to_station
+            cost = (station_distance_score + distance_to_robot) * similarity_score * (
+                station_sku_count / inventory_score
+            )
+            if best_cost is None or cost < best_cost:
+                best_cost = cost
+                best_pod = pod
+
+        return best_pod
     
     def getPodNeedReplenishment(self, list_of_sku):
         replenished_pod_needed_every_sku = {}
