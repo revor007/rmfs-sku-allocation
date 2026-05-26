@@ -20,6 +20,10 @@ def get_working_path(dev_mode = False):
     return result
 
 def write_to_csv(filename, header, data, start_date_string, folder_name="result"):
+    enabled = os.getenv("RMFS_ENABLE_RUNTIME_CSV_LOGS", "0").strip().lower()
+    if enabled not in {"1", "true", "yes", "y", "on"}:
+        return
+
     folder_path = os.path.join(folder_name, start_date_string)
 
     if not os.path.exists(folder_path):

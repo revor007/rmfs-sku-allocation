@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from experiment_context import load_experiment_context
+from experiment_context import get_writable_output_path, load_experiment_context
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -79,10 +79,13 @@ def empirical_percentile_n_plus_one(values: np.ndarray, alpha: float) -> tuple[f
 
 def main():
     context = load_experiment_context(BASE_DIR)
-    training_orders = context.train_eligible_df.copy()
-    daily_demand_by_sku = build_daily_demand_series(training_orders)
+    full_horizon_orders = pd.concat(
+        [context.train_eligible_df, context.test_eligible_df],
+        ignore_index=True,
+    )
+    daily_demand_by_sku = build_daily_demand_series(full_horizon_orders)
     if not daily_demand_by_sku:
-        raise ValueError("No training demand remains to estimate minimum inventory.")
+        raise ValueError("No eligible demand remains to estimate minimum inventory.")
 
     pre_t_order_counts = (
         context.sku_status_df.set_index("item_code")["pre_t_order_count"].astype(int).to_dict()
@@ -105,7 +108,7 @@ def main():
                 "item_code": sku,
                 "minimum_inventory": max(0.0, reorder_point),
                 "minimum_inventory_ceiling": minimum_inventory_ceiling,
-                "inventory_basis_source": "lead_time_percentile_n_plus_one",
+                "inventory_basis_source": "full_horizon_lead_time_percentile_n_plus_one",
                 "paired_historical_product": "",
                 "pre_t_order_count": int(pre_t_order_counts.get(sku, 0)),
                 "daily_observation_count": int(demand_series.size),
@@ -121,7 +124,8 @@ def main():
         raise ValueError("Minimum inventory results are empty.")
 
     result_df = result_df.sort_values("item_code").reset_index(drop=True)
-    result_df.to_csv(OUTPUT_PATH, index=False, sep=";", encoding="utf-8-sig", decimal=",")
+    output_path = get_writable_output_path(OUTPUT_PATH)
+    result_df.to_csv(output_path, index=False, sep=";", encoding="utf-8-sig", decimal=",")
 
     detail_df = pd.DataFrame(
         [
@@ -139,17 +143,19 @@ def main():
             {"metric": "minimum_inventory_skus", "value": len(result_df)},
         ]
     )
-    detail_df.to_csv(DETAIL_PATH, index=False, sep=";", encoding="utf-8-sig", decimal=",")
+    detail_path = get_writable_output_path(DETAIL_PATH)
+    detail_df.to_csv(detail_path, index=False, sep=";", encoding="utf-8-sig", decimal=",")
 
     print(f"Cutoff ratio: {context.cutoff_ratio:.2f}")
     print(f"Cutoff timestamp: {context.cutoff_time}")
+    print("Demand basis: full eligible order horizon (train + test)")
     print(f"Lead time days: {LEAD_TIME_DAYS}")
     print(f"Target service level: {TARGET_SERVICE_LEVEL:.2%}")
     print("Percentile method: (n + 1)p with linear interpolation")
     print(f"Eligible SKUs: {len(context.eligible_skus):,}")
     print(f"Historical SKUs: {len(context.historical_skus):,}")
     print(f"New SKUs: {len(context.new_skus):,}")
-    print(f"Minimum inventory saved to: {OUTPUT_PATH}")
+    print(f"Minimum inventory saved to: {output_path}")
 
 
 if __name__ == "__main__":
