@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+from collections import Counter
 from typing import Optional, List, TYPE_CHECKING, Dict
 import time
 
@@ -114,6 +115,8 @@ class Warehouse:
         self.last_hold_recheck_tick = -1
         
         self.sku_picking_queue = []  # Queue for SKUs that need to be picked
+        self.queued_qty_by_order: Dict[int, Dict] = {}
+        self.active_job_qty_by_order: Dict[int, Dict] = {}
         self.pending_replenishment_dispatches: List[Dict] = []
         self.replenishment_dispatch_aging_ticks = int(
             os.getenv("RMFS_REPLENISHMENT_AGING_TICKS", "300")
@@ -145,6 +148,72 @@ class Warehouse:
         self._health_prev_sku_queue_len = 0
         self._health_prev_unfinished_orders = 0
     
+    def _increase_nested_quantity(self, store: Dict, order_id, sku, qty):
+        if order_id is None or sku is None or qty <= 0:
+            return
+
+        order_bucket = store.get(order_id)
+        if order_bucket is None:
+            order_bucket = {}
+            store[order_id] = order_bucket
+
+        order_bucket[sku] = order_bucket.get(sku, 0) + qty
+
+    def _decrease_nested_quantity(self, store: Dict, order_id, sku, qty):
+        if order_id is None or sku is None or qty <= 0:
+            return
+
+        order_bucket = store.get(order_id)
+        if not order_bucket:
+            return
+
+        remaining_qty = order_bucket.get(sku, 0) - qty
+        if remaining_qty > 0:
+            order_bucket[sku] = remaining_qty
+        else:
+            order_bucket.pop(sku, None)
+
+        if not order_bucket:
+            store.pop(order_id, None)
+
+    def _enqueue_sku_request(self, order_id, sku, qty):
+        if qty is None or qty <= 0:
+            return None
+
+        request = {"order_id": order_id, "sku": sku, "qty": qty}
+        self.sku_picking_queue.append(request)
+        self._increase_nested_quantity(self.queued_qty_by_order, order_id, sku, qty)
+        return request
+
+    def _rebuild_sku_picking_queue_index(self):
+        rebuilt_index = {}
+        for request in self.sku_picking_queue:
+            self._increase_nested_quantity(
+                rebuilt_index,
+                request.get("order_id"),
+                request.get("sku"),
+                request.get("qty", 0),
+            )
+        self.queued_qty_by_order = rebuilt_index
+
+    def _replace_sku_picking_queue(self, new_queue):
+        self.sku_picking_queue = new_queue
+        self._rebuild_sku_picking_queue_index()
+
+    def _register_active_job_quantity(self, order_id, sku, qty):
+        self._increase_nested_quantity(self.active_job_qty_by_order, order_id, sku, qty)
+
+    def _release_active_job_quantity(self, order_id, sku, qty):
+        self._decrease_nested_quantity(self.active_job_qty_by_order, order_id, sku, qty)
+
+    def _add_picking_task_to_job(self, job: Job, order_id, sku, qty):
+        job.addPickingTask(order_id, sku, qty)
+        self._register_active_job_quantity(order_id, sku, qty)
+
+    def _release_job_active_quantities(self, job: Job):
+        for order_id, sku, qty in job.orders:
+            self._release_active_job_quantity(order_id, sku, qty)
+
     
     def setAssignOrderData(self):
         file_path = PARENT_DIRECTORY + "/data/input/assign_order.csv"
@@ -481,6 +550,7 @@ class Warehouse:
     def finishPickingTask(self, job: Job):
         pod: Pod = job.pod
         sku_need_replenished = []
+        self._release_job_active_quantities(job)
         for order_id, sku, quantity in job.orders:
             order: Order = self.order_manager.getOrderById(order_id)
             actual_picked = pod.pickSKU(sku, quantity)
@@ -499,13 +569,7 @@ class Warehouse:
             remaining_qty = quantity - actual_picked
             if remaining_qty > 0:
                 order.releaseCommittedQuantity(sku, remaining_qty)
-                self.sku_picking_queue.append(
-                    {
-                        "order_id": order_id,
-                        "sku": sku,
-                        "qty": remaining_qty,
-                    }
-                )
+                self._enqueue_sku_request(order_id, sku, remaining_qty)
                 order.is_in_queue = True
 
             sku, replenished_status = self.pod_manager.isSKUNeedReplenishment(sku)
@@ -699,35 +763,10 @@ class Warehouse:
         return new_orders
 
     def getActiveJobQuantitiesForOrder(self, order_id):
-        active_quantities = {}
-
-        for robot in self.robot_manager.getAllRobots():
-            job = robot.job
-            if job is None or job.is_finished:
-                continue
-
-            for job_order_id, sku, qty in job.orders:
-                if job_order_id != order_id:
-                    continue
-                active_quantities[sku] = active_quantities.get(sku, 0) + qty
-
-        return active_quantities
+        return dict(self.active_job_qty_by_order.get(order_id, {}))
 
     def getQueuedQuantitiesForOrder(self, order_id):
-        queued_quantities = {}
-
-        for request in self.sku_picking_queue:
-            if request.get("order_id") != order_id:
-                continue
-
-            sku = request.get("sku")
-            qty = request.get("qty", 0)
-            if sku is None or qty <= 0:
-                continue
-
-            queued_quantities[sku] = queued_quantities.get(sku, 0) + qty
-
-        return queued_quantities
+        return dict(self.queued_qty_by_order.get(order_id, {}))
 
     def repairOrderDemandState(self, order: Order):
         if order is None or order.isOrderCompleted():
@@ -755,13 +794,7 @@ class Warehouse:
             missing_qty = true_remaining_qty - accounted_qty
 
             if missing_qty > 0:
-                self.sku_picking_queue.append(
-                    {
-                        "order_id": order.id,
-                        "sku": sku,
-                        "qty": missing_qty,
-                    }
-                )
+                self._enqueue_sku_request(order.id, sku, missing_qty)
                 queued_quantities[sku] = queued_qty + missing_qty
                 order.is_in_queue = True
                 repaired = True
@@ -1028,8 +1061,7 @@ class Warehouse:
             if not order.is_in_queue:
                 for sku, details in order.getRemainingSKU().items():
                     if details > 0: # Pastikan hanya minta item yang masih dibutuhkan
-                        request = {'order_id': order.id, 'sku': sku, 'qty': details}
-                        self.sku_picking_queue.append(request)
+                        self._enqueue_sku_request(order.id, sku, details)
                 
                 # Tandai order ini agar tidak dimasukkan ke antrian lagi
                 order.is_in_queue = True 
@@ -1904,7 +1936,7 @@ class Warehouse:
             if pod_id in jobs_created_this_tick:
                 # KASUS A: SUDAH ADA JOB UNTUK POD INI -> 'Titip' tugas baru
                 job = jobs_created_this_tick[pod_id]
-                job.addPickingTask(order_id, sku_id, request['qty'])
+                self._add_picking_task_to_job(job, order_id, sku_id, request['qty'])
                 print(f"DEBUG: Hitchhiked SKU {sku_id} for Order {order_id} onto existing Job {job.id}")
             else:
                 # KASUS B: BELUM ADA JOB UNTUK POD INI -> Buat job baru
@@ -1914,7 +1946,7 @@ class Warehouse:
                     station_id=order.station_id,
                     pod=available_pod
                 )
-                job.addPickingTask(order_id, sku_id, request['qty'])
+                self._add_picking_task_to_job(job, order_id, sku_id, request['qty'])
                 
                 # Cari robot terdekat dan berikan job
                 robot_to_assign = self.robot_manager.findNearestAvailableRobot(available_pod.coordinate)
@@ -1925,6 +1957,7 @@ class Warehouse:
                     jobs_created_this_tick[pod_id] = job # Catat job baru ini untuk bundling
                 else:
                     # Seharusnya tidak terjadi, tapi ini safety net
+                    self._release_active_job_quantity(order_id, sku_id, request['qty'])
                     continue
             
                 self.assign_order_df.loc[((self.assign_order_df['order_id'] == order.id) & (self.assign_order_df['item_id'] == sku_id)), 'assigned_pod'] = int(available_pod.pod_number)
@@ -1936,7 +1969,18 @@ class Warehouse:
 
         # 6. Setelah loop selesai, bersihkan semua permintaan yang sudah jadi Job
         if processed_requests:
-            self.sku_picking_queue = [req for req in self.sku_picking_queue if req not in processed_requests]
+            processed_counter = Counter(
+                (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+                for req in processed_requests
+            )
+            rebuilt_queue = []
+            for req in self.sku_picking_queue:
+                key = (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+                if processed_counter.get(key, 0) > 0:
+                    processed_counter[key] -= 1
+                    continue
+                rebuilt_queue.append(req)
+            self._replace_sku_picking_queue(rebuilt_queue)
             # print(f"✅ Batch assigned {len(jobs_created_this_tick)} jobs for {len(processed_requests)} SKU requests.")
 
     def assignJobsInBatches_MODIFIED(self):
@@ -2049,7 +2093,7 @@ class Warehouse:
                         continue
 
                     order.commitQuantity(req['sku'], req['qty'])
-                    job.addPickingTask(req['order_id'], req['sku'], req['qty'])
+                    self._add_picking_task_to_job(job, req['order_id'], req['sku'], req['qty'])
 
                     # Update DataFrame atau status tracking lo
                     self.assign_order_df.loc[((self.assign_order_df['order_id'] == req['order_id']) & (self.assign_order_df['item_id'] == req['sku'])), 'assigned_pod'] = int(pod_object.pod_number)
@@ -2069,7 +2113,26 @@ class Warehouse:
                 unprocessed_requests.extend(pod_requests)
 
         # 4. Update antrian utama: buang yang sudah diproses, sisakan yang belum
-        self.sku_picking_queue = unprocessed_requests + [req for req in self.sku_picking_queue if req not in processed_requests and req not in unprocessed_requests]
+        processed_counter = Counter(
+            (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+            for req in processed_requests
+        )
+        unprocessed_counter = Counter(
+            (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+            for req in unprocessed_requests
+        )
+        remaining_requests = []
+        for req in self.sku_picking_queue:
+            key = (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+            if processed_counter.get(key, 0) > 0:
+                processed_counter[key] -= 1
+                continue
+            if unprocessed_counter.get(key, 0) > 0:
+                unprocessed_counter[key] -= 1
+                continue
+            remaining_requests.append(req)
+
+        self._replace_sku_picking_queue(unprocessed_requests + remaining_requests)
 
     # ================= LOGIKA BARU END ===================
 

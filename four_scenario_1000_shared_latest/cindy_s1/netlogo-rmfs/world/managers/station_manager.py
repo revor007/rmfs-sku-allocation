@@ -87,77 +87,59 @@ class StationManager:
         return available_station
 
     def findHighestSimilarityStation(self, skus_in_order, pod_manager: PodManager) -> Optional[Station]:
-        available_station_rank = pd.DataFrame(
-            columns=["station_id", "similarity_score", "order_count", "incoming_pod_count"]
-        )
-        sku_in_order_list = [i for i in skus_in_order]
-        available_station = []
-        assignStation = None
+        sku_in_order_list = list(skus_in_order)
+        available_station = [
+            station
+            for station in self.picking_stations
+            if len(station.order_ids) < station.max_orders
+        ]
 
-        # Store all available station
-        for station in self.picking_stations:
-            if len(station.order_ids) < station.max_orders:
-                available_station.append(station)
-    
+        if len(available_station) == 1:
+            return available_station[0]
 
-        # Check if more than one station is available
-        if len(available_station) > 1:
-            for station in available_station:
-                # Check Available Station
-                similarity_score = 0
-                if len(station.order_ids) < station.max_orders:
-                    # Take pod assigned to this particular station
-                    station_incoming_pod = station.incoming_pod
-                    station_pod_skus_set = set()
-                    for pod_id in station_incoming_pod:
-                        pod  = pod_manager.getPodByNumber(pod_id)
-                        pod_skus = [item for item, details in pod.skus.items() if details['current_qty'] > 0]
-                        station_pod_skus_set.update(pod_skus)
+        if len(available_station) <= 0:
+            return None
 
-                    station_pod_skus_list = list(station_pod_skus_set)
-                    station_pod_skus_in_order_mask = np.isin(sku_in_order_list, station_pod_skus_list)
-                    station_pod_skus_in_order = np.array(sku_in_order_list)[station_pod_skus_in_order_mask]
-                    similarity_score = len(station_pod_skus_in_order)
+        station_rankings = []
+        for station in available_station:
+            station_pod_skus_set = set()
+            for pod_id in station.incoming_pod:
+                pod = pod_manager.getPodByNumber(pod_id)
+                if pod is None:
+                    continue
+                for item, details in pod.skus.items():
+                    if details['current_qty'] > 0:
+                        station_pod_skus_set.add(item)
 
-                    available_station_rank = pd.concat([available_station_rank , 
-                                                pd.DataFrame(
-                                                    [[
-                                                        station.station_id,
-                                                        similarity_score,
-                                                        len(station.order_ids),
-                                                        len(station.incoming_pod),
-                                                    ]],
-                                                    columns=[
-                                                        "station_id",
-                                                        "similarity_score",
-                                                        "order_count",
-                                                        "incoming_pod_count",
-                                                    ],
-                                                )], ignore_index=True) 
-            
-            if len(available_station_rank) > 0:
-                max_similarity = available_station_rank["similarity_score"].max()
+            similarity_score = sum(1 for sku in sku_in_order_list if sku in station_pod_skus_set)
+            station_rankings.append(
+                (
+                    station,
+                    similarity_score,
+                    len(station.order_ids),
+                    len(station.incoming_pod),
+                )
+            )
 
-                if max_similarity <= 0:
-                    return self.findAvailablePickingStation()
+        if not station_rankings:
+            return None
 
-                best_rows = available_station_rank[
-                    available_station_rank["similarity_score"] == max_similarity
-                ].copy()
+        max_similarity = max(ranking[1] for ranking in station_rankings)
+        if max_similarity <= 0:
+            return self.findAvailablePickingStation()
 
-                min_order_count = best_rows["order_count"].min()
-                best_rows = best_rows[best_rows["order_count"] == min_order_count]
+        best_rankings = [
+            ranking for ranking in station_rankings if ranking[1] == max_similarity
+        ]
+        min_order_count = min(ranking[2] for ranking in best_rankings)
+        best_rankings = [
+            ranking for ranking in best_rankings if ranking[2] == min_order_count
+        ]
+        min_incoming_pods = min(ranking[3] for ranking in best_rankings)
+        best_rankings = [
+            ranking for ranking in best_rankings if ranking[3] == min_incoming_pods
+        ]
 
-                min_incoming_pods = best_rows["incoming_pod_count"].min()
-                best_rows = best_rows[
-                    best_rows["incoming_pod_count"] == min_incoming_pods
-                ]
-
-                assignStation_id = random.choice(best_rows["station_id"].tolist())
-                assignStation = self.getStationById(assignStation_id)
-        elif len(available_station) == 1:
-            assignStation = available_station[0]
-
-        return assignStation
+        return random.choice(best_rankings)[0]
 
     
