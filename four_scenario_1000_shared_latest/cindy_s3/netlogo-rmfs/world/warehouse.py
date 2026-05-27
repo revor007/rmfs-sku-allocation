@@ -58,6 +58,7 @@ class Warehouse:
         self.pod_visit_to_station = 0  # Track pod visits count to picking station
         self.orders_fulfilled = 0  # Track order fulfillment count
         self.delivered_order_lines = 0  # Track fully satisfied order-SKU lines
+        self.total_picked_units = 0  # Track total picked unit quantity
         self.average_inventory_level = 0  # Track average inventory level
         self.average_pod_inventory_level = 0  # Track average pod inventory level
         self.average_weighted_pod_utilization = 0  # Track average weighted pod utilization
@@ -556,6 +557,7 @@ class Warehouse:
             order: Order = self.order_manager.getOrderById(order_id)
             actual_picked = pod.pickSKU(sku, quantity)
             if actual_picked > 0:
+                self.total_picked_units += int(actual_picked)
                 line_was_complete = (
                     order.skus[sku]["quantity_delivered"] >= order.skus[sku]["total_quantity"]
                 )

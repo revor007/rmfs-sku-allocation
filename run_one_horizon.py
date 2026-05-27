@@ -155,9 +155,11 @@ on_hold = int(
 fulfilled = int(warehouse.orders_fulfilled)
 arrived = int(len(warehouse.order_manager.orders))
 delivered_order_lines = int(getattr(warehouse, "delivered_order_lines", 0))
+picked_units = int(getattr(warehouse, "total_picked_units", 0))
 pod_visits = int(warehouse.pod_visit_to_station)
 energy = float(warehouse.total_energy)
 fixed_energy = float(warehouse.total_fixed_load_energy)
+variable_energy = max(0.0, energy - fixed_energy)
 result = pd.DataFrame(
     [
         {
@@ -179,8 +181,14 @@ result = pd.DataFrame(
             "sku_queue_length": int(len(warehouse.sku_picking_queue)),
             "pod_visits": pod_visits,
             "delivered_order_lines": delivered_order_lines,
+            "picked_units": picked_units,
             "delivered_order_lines_per_pod_visit": (
                 delivered_order_lines / pod_visits
+            )
+            if pod_visits
+            else 0.0,
+            "picked_units_per_pod_visit": (
+                picked_units / pod_visits
             )
             if pod_visits
             else 0.0,
@@ -215,11 +223,23 @@ result = pd.DataFrame(
             "stop_and_go": int(warehouse.stop_and_go),
             "total_energy": energy,
             "total_fixed_load_energy": fixed_energy,
+            "variable_energy": variable_energy,
             "energy_per_fulfilled_order": (energy / fulfilled) if fulfilled else 0.0,
             "fixed_energy_per_fulfilled_order": (
                 fixed_energy / fulfilled
             )
             if fulfilled
+            else 0.0,
+            "variable_energy_per_delivered_line": (
+                variable_energy / delivered_order_lines
+            )
+            if delivered_order_lines
+            else 0.0,
+            "energy_per_pod_visit": (energy / pod_visits) if pod_visits else 0.0,
+            "variable_energy_per_pod_visit": (
+                variable_energy / pod_visits
+            )
+            if pod_visits
             else 0.0,
             "wall_clock_seconds": elapsed,
         }

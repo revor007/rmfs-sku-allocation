@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+from collections import Counter
 from typing import Optional, List, TYPE_CHECKING, Dict
 import time
 
@@ -57,6 +58,7 @@ class Warehouse:
         self.pod_visit_to_station = 0  # Track pod visits count to picking station
         self.orders_fulfilled = 0  # Track order fulfillment count
         self.delivered_order_lines = 0  # Track fully satisfied order-SKU lines
+        self.total_picked_units = 0  # Track total picked unit quantity
         self.average_inventory_level = 0  # Track average inventory level
         self.average_pod_inventory_level = 0  # Track average pod inventory level
         self.average_weighted_pod_utilization = 0  # Track average weighted pod utilization
@@ -114,11 +116,105 @@ class Warehouse:
         self.last_hold_recheck_tick = -1
         
         self.sku_picking_queue = []  # Queue for SKUs that need to be picked
+        self.queued_qty_by_order: Dict[int, Dict] = {}
+        self.active_job_qty_by_order: Dict[int, Dict] = {}
         self.pending_replenishment_dispatches: List[Dict] = []
         self.replenishment_dispatch_aging_ticks = int(
             os.getenv("RMFS_REPLENISHMENT_AGING_TICKS", "300")
         )
+        self.health_check_interval = int(os.getenv("RMFS_HEALTH_CHECK_INTERVAL", "0"))
+        self.health_stall_ticks = int(os.getenv("RMFS_HEALTH_STALL_TICKS", "600"))
+        self.persist_assign_order_csv = os.getenv(
+            "RMFS_PERSIST_ASSIGN_ORDER_CSV",
+            "0",
+        ).strip().lower() in {"1", "true", "yes", "y", "on"}
+        self.last_health_check_tick = -1
+        self.health_status = "healthy"
+        self.last_health_status = "healthy"
+        self.health_consistency_violations = 0
+        self.health_zombie_order_count = 0
+        self.health_pending_replenishment_count = 0
+        self.health_aged_pending_replenishment_count = 0
+        self.health_oldest_pending_replenishment_age = 0
+        self.health_last_progress_tick = 0
+        self.health_last_fulfillment_tick = 0
+        self.health_last_pod_visit_tick = 0
+        self.health_last_replenishment_tick = 0
+        self.health_last_queue_change_tick = 0
+        self.health_last_unfinished_decrease_tick = 0
+        self.health_stalled_tick_count = 0
+        self._health_prev_fulfilled_orders = 0
+        self._health_prev_pod_visits = 0
+        self._health_prev_replenishment_trips = 0
+        self._health_prev_sku_queue_len = 0
+        self._health_prev_unfinished_orders = 0
     
+    def _increase_nested_quantity(self, store: Dict, order_id, sku, qty):
+        if order_id is None or sku is None or qty <= 0:
+            return
+
+        order_bucket = store.get(order_id)
+        if order_bucket is None:
+            order_bucket = {}
+            store[order_id] = order_bucket
+
+        order_bucket[sku] = order_bucket.get(sku, 0) + qty
+
+    def _decrease_nested_quantity(self, store: Dict, order_id, sku, qty):
+        if order_id is None or sku is None or qty <= 0:
+            return
+
+        order_bucket = store.get(order_id)
+        if not order_bucket:
+            return
+
+        remaining_qty = order_bucket.get(sku, 0) - qty
+        if remaining_qty > 0:
+            order_bucket[sku] = remaining_qty
+        else:
+            order_bucket.pop(sku, None)
+
+        if not order_bucket:
+            store.pop(order_id, None)
+
+    def _enqueue_sku_request(self, order_id, sku, qty):
+        if qty is None or qty <= 0:
+            return None
+
+        request = {"order_id": order_id, "sku": sku, "qty": qty}
+        self.sku_picking_queue.append(request)
+        self._increase_nested_quantity(self.queued_qty_by_order, order_id, sku, qty)
+        return request
+
+    def _rebuild_sku_picking_queue_index(self):
+        rebuilt_index = {}
+        for request in self.sku_picking_queue:
+            self._increase_nested_quantity(
+                rebuilt_index,
+                request.get("order_id"),
+                request.get("sku"),
+                request.get("qty", 0),
+            )
+        self.queued_qty_by_order = rebuilt_index
+
+    def _replace_sku_picking_queue(self, new_queue):
+        self.sku_picking_queue = new_queue
+        self._rebuild_sku_picking_queue_index()
+
+    def _register_active_job_quantity(self, order_id, sku, qty):
+        self._increase_nested_quantity(self.active_job_qty_by_order, order_id, sku, qty)
+
+    def _release_active_job_quantity(self, order_id, sku, qty):
+        self._decrease_nested_quantity(self.active_job_qty_by_order, order_id, sku, qty)
+
+    def _add_picking_task_to_job(self, job: Job, order_id, sku, qty):
+        job.addPickingTask(order_id, sku, qty)
+        self._register_active_job_quantity(order_id, sku, qty)
+
+    def _release_job_active_quantities(self, job: Job):
+        for order_id, sku, qty in job.orders:
+            self._release_active_job_quantity(order_id, sku, qty)
+
     
     def setAssignOrderData(self):
         file_path = PARENT_DIRECTORY + "/data/input/assign_order.csv"
@@ -264,6 +360,7 @@ class Warehouse:
         # Give aged replenishment requests a chance to dispatch before
         # regular picking assignment. Non-aged requests wait until after
         # picking dispatch and use any remaining idle robots.
+        self.refreshMandatoryReplenishmentPods()
         self.dispatchPendingReplenishmentRequests(prioritize_aged_only=True)
 
         # Baseline job assignment 
@@ -418,8 +515,10 @@ class Warehouse:
                         
 
                 if o.current_state == 'idle' and o.job is not None:
-                    self.pod_manager.setPodAvailable(o.job.pod)
-                    o.job = None
+                    released_pod = o.job.pod
+                    if not self.tryGuaranteeReplenishmentOnRelease(released_pod, o):
+                        self.pod_manager.setPodAvailable(released_pod)
+                        o.job = None
 
         self.total_energy = total_energy
         self.total_fixed_load_energy = total_fixed_load_energy
@@ -430,6 +529,14 @@ class Warehouse:
             self.next_process_tick += 1
             if self.update_intersection_using_RL:
                 self.intersection_manager.updateModelAfterExecution(self._tick)
+
+        current_tick = int(self._tick)
+        if (
+            self.health_check_interval > 0
+            and current_tick % self.health_check_interval == 0
+            and current_tick != self.last_health_check_tick
+        ):
+            self.refreshSimulationHealth()
 
         self._tick += TICK_TO_SECOND
         self._step += 1
@@ -444,10 +551,13 @@ class Warehouse:
     def finishPickingTask(self, job: Job):
         pod: Pod = job.pod
         sku_need_replenished = []
+        self._release_job_active_quantities(job)
+        file_path = PARENT_DIRECTORY + "/data/input/assign_order.csv"
         for order_id, sku, quantity in job.orders:
             order: Order = self.order_manager.getOrderById(order_id)
             actual_picked = pod.pickSKU(sku, quantity)
             if actual_picked > 0:
+                self.total_picked_units += int(actual_picked)
                 line_was_complete = (
                     order.skus[sku]["quantity_delivered"] >= order.skus[sku]["total_quantity"]
                 )
@@ -461,19 +571,35 @@ class Warehouse:
 
             remaining_qty = quantity - actual_picked
             if remaining_qty > 0:
-                self.sku_picking_queue.append(
-                    {
-                        "order_id": order_id,
-                        "sku": sku,
-                        "qty": remaining_qty,
-                    }
-                )
+                order.releaseCommittedQuantity(sku, remaining_qty)
+                self._enqueue_sku_request(order_id, sku, remaining_qty)
                 order.is_in_queue = True
 
             sku, replenished_status = self.pod_manager.isSKUNeedReplenishment(sku)
 
             # SKU Replenished Triggered
             if(replenished_status == True): sku_need_replenished.append(sku)
+
+            sku_remaining = order.getQuantityLeftForSKU(sku)
+            line_status = 1 if sku_remaining <= 0 else 0
+            self.assign_order_df.loc[
+                ((self.assign_order_df['order_id'] == order.id) & (self.assign_order_df['item_id'] == sku)),
+                'status'
+            ] = line_status
+            if self.persist_assign_order_csv:
+                self.assign_order_df.to_csv(file_path, index=False)
+            self.updated_assigned_order = True
+
+            if order.isOrderCompleted():
+                self.order_manager.finishOrder(order_id, int(self._tick))
+                station = self.station_manager.getStationById(order.station_id)
+                if station is not None:
+                    station.removeOrder(order_id, order)
+                self.insertFinishedOrderToCSV(order)
+                self.orders_fulfilled += 1
+
+        if sku_need_replenished:
+            self.global_critical_skus.update(sku_need_replenished)
     
     #     return None
 
@@ -502,24 +628,6 @@ class Warehouse:
     #         actual_picked = pod.pickSKU(sku, quantity)  # Let pod handle its own inventory
     #         self.pod_manager.updateGlobalInventory(sku, actual_picked)  # Update global tracking
     #         order.deliverQuantity(sku, actual_picked)  # Only deliver what was actually picked
-
-            file_path = PARENT_DIRECTORY + "/data/input/assign_order.csv"
-            # assign_order_df = pd.read_csv(file_path)
-            sku_remaining = order.getQuantityLeftForSKU(sku)
-            line_status = 1 if sku_remaining <= 0 else 0
-            self.assign_order_df.loc[
-                ((self.assign_order_df['order_id'] == order.id) & (self.assign_order_df['item_id'] == sku)),
-                'status'
-            ] = line_status
-            self.assign_order_df.to_csv(file_path, index=False)
-            self.updated_assigned_order = True
-            
-            if order.isOrderCompleted():
-                self.order_manager.finishOrder(order_id, int(self._tick))
-                station = self.station_manager.getStationById(self.assign_order_df.loc[self.assign_order_df['order_id'] == order.id, 'assigned_station'].values[0])
-                station.removeOrder(order_id,order)
-                self.insertFinishedOrderToCSV(order)
-                self.orders_fulfilled += 1  # Increment order fulfillment count
 
         # # TRACY
         # # Get pod that have SKU that need to be replenished
@@ -559,6 +667,11 @@ class Warehouse:
                 if restored_qty > 0:
                     restored_quantities[sku_id] = restored_qty
                     self.pod_manager.increaseSKUData(sku_id, restored_qty)
+                    _, still_below_reorder = self.pod_manager.isSKUNeedReplenishment(sku_id)
+                    if still_below_reorder:
+                        self.global_critical_skus.add(sku_id)
+                    else:
+                        self.global_critical_skus.discard(sku_id)
 
         # Update metrik
         self.replenishment_count += skus_replenished
@@ -566,6 +679,7 @@ class Warehouse:
         self.replenishment_trips += 1
         pod.is_awaiting_replenishment = False
         pod.has_pending_replenishment_dispatch = False
+        pod.must_replenish_before_pick = False
         if restored_quantities:
             self.recheck_on_hold_orders_for_skus(restored_quantities.keys())
         
@@ -650,10 +764,276 @@ class Warehouse:
                 order.addSKU(item['item_id'], item['item_quantity'])
         return new_orders
 
+    def getActiveJobQuantitiesForOrder(self, order_id):
+        return dict(self.active_job_qty_by_order.get(order_id, {}))
+
+    def getQueuedQuantitiesForOrder(self, order_id):
+        return dict(self.queued_qty_by_order.get(order_id, {}))
+
+    def repairOrderDemandState(self, order: Order):
+        if order is None or order.isOrderCompleted():
+            return False
+
+        if order.station_id is None:
+            order.is_in_queue = False
+
+        active_job_quantities = self.getActiveJobQuantitiesForOrder(order.id)
+        queued_quantities = self.getQueuedQuantitiesForOrder(order.id)
+        repaired = False
+
+        for sku, details in order.skus.items():
+            delivered_qty = details["quantity_delivered"]
+            committed_qty = details["quantity_committed"]
+            total_qty = details["total_quantity"]
+
+            active_committed_qty = active_job_quantities.get(sku, 0)
+            stranded_committed_qty = max(0, committed_qty - active_committed_qty)
+            if stranded_committed_qty > 0:
+                order.releaseCommittedQuantity(sku, stranded_committed_qty)
+                committed_qty -= stranded_committed_qty
+                repaired = True
+
+            true_remaining_qty = max(0, total_qty - delivered_qty)
+            queued_qty = queued_quantities.get(sku, 0)
+            accounted_qty = active_committed_qty + queued_qty
+            missing_qty = true_remaining_qty - accounted_qty
+
+            if missing_qty > 0 and order.station_id is not None:
+                self._enqueue_sku_request(order.id, sku, missing_qty)
+                queued_quantities[sku] = queued_qty + missing_qty
+                order.is_in_queue = True
+                repaired = True
+
+        return repaired
+
+    def updateHealthProgressMarkers(self):
+        current_tick = int(self._tick)
+        progress_happened = False
+
+        current_fulfilled_orders = int(self.orders_fulfilled)
+        if current_fulfilled_orders > self._health_prev_fulfilled_orders:
+            self.health_last_fulfillment_tick = current_tick
+            progress_happened = True
+        self._health_prev_fulfilled_orders = current_fulfilled_orders
+
+        current_pod_visits = int(self.pod_visit_to_station)
+        if current_pod_visits > self._health_prev_pod_visits:
+            self.health_last_pod_visit_tick = current_tick
+            progress_happened = True
+        self._health_prev_pod_visits = current_pod_visits
+
+        current_replenishment_trips = int(self.replenishment_trips)
+        if current_replenishment_trips > self._health_prev_replenishment_trips:
+            self.health_last_replenishment_tick = current_tick
+            progress_happened = True
+        self._health_prev_replenishment_trips = current_replenishment_trips
+
+        current_sku_queue_len = int(len(self.sku_picking_queue))
+        if current_sku_queue_len != self._health_prev_sku_queue_len:
+            self.health_last_queue_change_tick = current_tick
+            progress_happened = True
+        self._health_prev_sku_queue_len = current_sku_queue_len
+
+        current_unfinished_orders = int(len(self.order_manager.unfinished_orders))
+        if current_unfinished_orders < self._health_prev_unfinished_orders:
+            self.health_last_unfinished_decrease_tick = current_tick
+            progress_happened = True
+        self._health_prev_unfinished_orders = current_unfinished_orders
+
+        if progress_happened:
+            self.health_last_progress_tick = current_tick
+
+    def countHealthConsistencyViolations(self):
+        violations = 0
+        zombie_orders = 0
+
+        for order in self.order_manager.orders:
+            true_remaining_total = 0
+            for details in order.skus.values():
+                total_qty = details["total_quantity"]
+                delivered_qty = details["quantity_delivered"]
+                committed_qty = details["quantity_committed"]
+
+                if delivered_qty < 0 or committed_qty < 0:
+                    violations += 1
+                if delivered_qty > total_qty or committed_qty > total_qty:
+                    violations += 1
+                if delivered_qty + committed_qty > total_qty:
+                    violations += 1
+
+                true_remaining_total += max(0, total_qty - delivered_qty)
+
+            if (
+                order in self.order_manager.unfinished_orders
+                and not order.isOrderCompleted()
+                and not order.getRemainingSKU()
+                and true_remaining_total > 0
+            ):
+                active_job_qty = sum(self.getActiveJobQuantitiesForOrder(order.id).values())
+                queued_qty = sum(self.getQueuedQuantitiesForOrder(order.id).values())
+                if active_job_qty + queued_qty == 0:
+                    zombie_orders += 1
+
+        return violations, zombie_orders
+
+    def getPendingReplenishmentHealth(self):
+        current_tick = int(self._tick)
+        pending_count = len(self.pending_replenishment_dispatches)
+        if pending_count == 0:
+            return 0, 0, 0
+
+        oldest_age = 0
+        aged_count = 0
+        for request in self.pending_replenishment_dispatches:
+            age = max(0, current_tick - int(request.get("created_tick", current_tick)))
+            if age > oldest_age:
+                oldest_age = age
+            if age >= self.replenishment_dispatch_aging_ticks:
+                aged_count += 1
+
+        return pending_count, aged_count, oldest_age
+
+    @staticmethod
+    def getHealthSeverity(status: str) -> int:
+        severity = {
+            "healthy": 0,
+            "warning": 1,
+            "stalled": 2,
+        }
+        return severity.get(status, 0)
+
+    def buildHealthSnapshot(self):
+        current_tick = int(self._tick)
+        progress_gap = max(0, current_tick - self.health_last_progress_tick)
+
+        return {
+            "tick": current_tick,
+            "fulfilled_orders": int(self.orders_fulfilled),
+            "unfinished_orders": int(len(self.order_manager.unfinished_orders)),
+            "job_queue_length": int(len(self.job_queue)),
+            "sku_queue_length": int(len(self.sku_picking_queue)),
+            "pod_visits": int(self.pod_visit_to_station),
+            "replenishment_trips": int(self.replenishment_trips),
+            "pending_replenishment_count": int(self.health_pending_replenishment_count),
+            "aged_pending_replenishment_count": int(self.health_aged_pending_replenishment_count),
+            "oldest_pending_replenishment_age": int(self.health_oldest_pending_replenishment_age),
+            "consistency_violations": int(self.health_consistency_violations),
+            "zombie_orders": int(self.health_zombie_order_count),
+            "last_progress_tick": int(self.health_last_progress_tick),
+            "progress_gap": int(progress_gap),
+            "status": self.health_status,
+        }
+
+    def writeHealthSnapshot(self, snapshot):
+        header = [
+            "tick",
+            "fulfilled_orders",
+            "unfinished_orders",
+            "job_queue_length",
+            "sku_queue_length",
+            "pod_visits",
+            "replenishment_trips",
+            "pending_replenishment_count",
+            "aged_pending_replenishment_count",
+            "oldest_pending_replenishment_age",
+            "consistency_violations",
+            "zombie_orders",
+            "last_progress_tick",
+            "progress_gap",
+            "status",
+        ]
+        data = [snapshot[column] for column in header]
+        write_to_csv(
+            "simulation-health.csv",
+            header,
+            data,
+            self.landscape.current_date_string,
+        )
+
+    def emitHealthStatusIfNeeded(self, snapshot):
+        current_severity = self.getHealthSeverity(snapshot["status"])
+        previous_severity = self.getHealthSeverity(self.last_health_status)
+
+        if (
+            current_severity > previous_severity
+            or (
+                snapshot["status"] != self.last_health_status
+                and snapshot["status"] != "healthy"
+            )
+        ):
+            print(
+                "SIM_HEALTH "
+                f"tick={snapshot['tick']} "
+                f"status={snapshot['status']} "
+                f"fulfilled={snapshot['fulfilled_orders']} "
+                f"unfinished={snapshot['unfinished_orders']} "
+                f"sku_queue={snapshot['sku_queue_length']} "
+                f"pending_repl={snapshot['pending_replenishment_count']} "
+                f"oldest_repl_age={snapshot['oldest_pending_replenishment_age']} "
+                f"zombies={snapshot['zombie_orders']} "
+                f"violations={snapshot['consistency_violations']}"
+            )
+
+        self.last_health_status = snapshot["status"]
+
+    def refreshSimulationHealth(self, force_log: bool = False):
+        self.updateHealthProgressMarkers()
+
+        violations, zombie_orders = self.countHealthConsistencyViolations()
+        pending_count, aged_count, oldest_age = self.getPendingReplenishmentHealth()
+
+        self.health_consistency_violations = violations
+        self.health_zombie_order_count = zombie_orders
+        self.health_pending_replenishment_count = pending_count
+        self.health_aged_pending_replenishment_count = aged_count
+        self.health_oldest_pending_replenishment_age = oldest_age
+
+        current_tick = int(self._tick)
+        progress_gap = max(0, current_tick - self.health_last_progress_tick)
+        unfinished_orders = len(self.order_manager.unfinished_orders)
+        after_last_arrival = current_tick >= int(getattr(self, "last_order_arrival", 0))
+
+        status = "healthy"
+        if violations > 0:
+            status = "stalled"
+        elif zombie_orders > 0:
+            status = "warning"
+
+        if (
+            status != "stalled"
+            and unfinished_orders > 0
+            and progress_gap >= self.health_stall_ticks
+            and (
+                after_last_arrival
+                or len(self.sku_picking_queue) > 0
+                or len(self.pending_replenishment_dispatches) > 0
+            )
+        ):
+            status = "stalled"
+
+        if (
+            status == "healthy"
+            and oldest_age >= max(self.replenishment_dispatch_aging_ticks * 2, self.health_check_interval)
+        ):
+            status = "warning"
+
+        self.health_status = status
+        if status == "stalled":
+            self.health_stalled_tick_count += 1
+
+        snapshot = self.buildHealthSnapshot()
+        if force_log or snapshot["tick"] != self.last_health_check_tick:
+            self.writeHealthSnapshot(snapshot)
+            self.emitHealthStatusIfNeeded(snapshot)
+            self.last_health_check_tick = snapshot["tick"]
+
+        return snapshot
+
     def processOrders(self):
         # Loop pada setiap order yang belum selesai
         orders_to_process = [o for o in self.order_manager.unfinished_orders if not o.on_hold]
         for order in orders_to_process:
+            self.repairOrderDemandState(order)
             can_be_fulfilled, insufficient_skus = self.canFulfillOrder(order)
         
             if not can_be_fulfilled:
@@ -686,8 +1066,7 @@ class Warehouse:
             if not order.is_in_queue:
                 for sku, details in order.getRemainingSKU().items():
                     if details > 0: # Pastikan hanya minta item yang masih dibutuhkan
-                        request = {'order_id': order.id, 'sku': sku, 'qty': details}
-                        self.sku_picking_queue.append(request)
+                        self._enqueue_sku_request(order.id, sku, details)
                 
                 # Tandai order ini agar tidak dimasukkan ke antrian lagi
                 order.is_in_queue = True 
@@ -834,7 +1213,6 @@ class Warehouse:
         - Pod availability issues
         """
         if not order or not order.getRemainingSKU():
-            print(f"Order {order.id} is empty or has no remaining SKUs.")
             return True, []  # Empty order is fulfillable
             
         insufficient_skus = []
@@ -870,37 +1248,46 @@ class Warehouse:
 
     def checkAndTriggerProactiveReplenishment(self):
         """
-        Periodically sweep idle pods and enqueue replenishment dispatch
-        requests using the same pod-health + global-watchlist rule as the
-        post-pick replenishment path.
+        Periodically sweep globally critical SKUs and assign at most one
+        replenishment request to the single most depleted eligible pod for
+        each SKU.
         """
         if not self.global_critical_skus:
             return
 
-        candidate_pods = []
-        for pod in self.pod_manager.getAllPods():
-            if (
-                pod is None
-                or not pod.is_idle
-                or pod.is_awaiting_replenishment
-                or pod.has_pending_replenishment_dispatch
-            ):
-                continue
+        for sku_id in sorted(self.global_critical_skus):
+            self.enqueueBestReplenishmentDispatchForSKU(sku_id)
 
-            skus_to_replenish, qj_score = self.get_replenishment_skus_for_pod(pod)
-            if skus_to_replenish:
-                candidate_pods.append((qj_score, pod, skus_to_replenish))
-
-        # Lowest-health pods first.
-        candidate_pods.sort(key=lambda item: item[0])
-
-        for _, pod, skus_to_replenish in candidate_pods:
-            self.enqueuePendingReplenishmentDispatch(pod, skus_to_replenish)
-
-    def enqueuePendingReplenishmentDispatch(self, pod: Pod, skus_to_replenish: List[str]):
+    def enqueuePendingReplenishmentDispatch(
+        self,
+        pod: Pod,
+        skus_to_replenish: List[str],
+    ):
         if pod is None or not skus_to_replenish:
             return False
-        if pod.is_awaiting_replenishment or pod.has_pending_replenishment_dispatch:
+        if pod.is_awaiting_replenishment:
+            return False
+
+        urgency_level = self.getReplenishmentUrgencyLevel(skus_to_replenish)
+        existing_request = self.getPendingReplenishmentDispatch(pod.pod_number)
+        if existing_request is not None:
+            merged_skus = sorted(
+                set(existing_request.get("skus_to_replenish", []))
+                .union(skus_to_replenish)
+            )
+            merged_urgency = max(
+                int(existing_request.get("urgency_level", 0)),
+                self.getReplenishmentUrgencyLevel(merged_skus),
+            )
+            existing_request["skus_to_replenish"] = merged_skus
+            existing_request["urgency_level"] = merged_urgency
+            existing_request["guaranteed_on_release"] = (
+                bool(existing_request.get("guaranteed_on_release", False))
+                or merged_urgency > 0
+            )
+            pod.has_pending_replenishment_dispatch = True
+            if bool(existing_request.get("guaranteed_on_release", False)):
+                pod.must_replenish_before_pick = True
             return False
 
         self.pending_replenishment_dispatches.append(
@@ -908,9 +1295,13 @@ class Warehouse:
                 "pod_number": int(pod.pod_number),
                 "skus_to_replenish": list(skus_to_replenish),
                 "created_tick": int(self._tick),
+                "urgency_level": int(urgency_level),
+                "guaranteed_on_release": bool(urgency_level > 0),
             }
         )
         pod.has_pending_replenishment_dispatch = True
+        if urgency_level > 0:
+            pod.must_replenish_before_pick = True
         return True
 
     def removePendingReplenishmentDispatch(self, pod_number: int):
@@ -929,6 +1320,7 @@ class Warehouse:
             pod = None
         if pod is not None:
             pod.has_pending_replenishment_dispatch = False
+            pod.must_replenish_before_pick = False
         return removed
 
     def dispatchPendingReplenishmentRequests(self, prioritize_aged_only: bool = False):
@@ -937,11 +1329,21 @@ class Warehouse:
 
         dispatched_count = 0
         current_tick = int(self._tick)
-        pending_requests = list(self.pending_replenishment_dispatches)
+        pending_requests = sorted(
+            list(self.pending_replenishment_dispatches),
+            key=lambda request: (
+                0 if self.shouldGuaranteeReplenishmentRequest(request, current_tick) else 1,
+                -int(request.get("urgency_level", 0)),
+                -(current_tick - int(request.get("created_tick", current_tick))),
+                int(request.get("pod_number", 0)),
+            ),
+        )
 
         for request in pending_requests:
-            wait_time = current_tick - int(request["created_tick"])
-            if prioritize_aged_only and wait_time < self.replenishment_dispatch_aging_ticks:
+            if (
+                prioritize_aged_only
+                and not self.shouldGuaranteeReplenishmentRequest(request, current_tick)
+            ):
                 continue
 
             station = self.station_manager.findAvailableReplenishmentStation()
@@ -1045,6 +1447,7 @@ class Warehouse:
             self.removePendingReplenishmentDispatch(pod.pod_number)
             pod.is_awaiting_replenishment = True
             pod.has_pending_replenishment_dispatch = False
+            pod.must_replenish_before_pick = False
             
             # Track replenishment metrics
             # self.replenishment_trips += 1
@@ -1538,7 +1941,7 @@ class Warehouse:
             if pod_id in jobs_created_this_tick:
                 # KASUS A: SUDAH ADA JOB UNTUK POD INI -> 'Titip' tugas baru
                 job = jobs_created_this_tick[pod_id]
-                job.addPickingTask(order_id, sku_id, request['qty'])
+                self._add_picking_task_to_job(job, order_id, sku_id, request['qty'])
                 print(f"DEBUG: Hitchhiked SKU {sku_id} for Order {order_id} onto existing Job {job.id}")
             else:
                 # KASUS B: BELUM ADA JOB UNTUK POD INI -> Buat job baru
@@ -1548,7 +1951,7 @@ class Warehouse:
                     station_id=order.station_id,
                     pod=available_pod
                 )
-                job.addPickingTask(order_id, sku_id, request['qty'])
+                self._add_picking_task_to_job(job, order_id, sku_id, request['qty'])
                 
                 # Cari robot terdekat dan berikan job
                 robot_to_assign = self.robot_manager.findNearestAvailableRobot(available_pod.coordinate)
@@ -1559,6 +1962,7 @@ class Warehouse:
                     jobs_created_this_tick[pod_id] = job # Catat job baru ini untuk bundling
                 else:
                     # Seharusnya tidak terjadi, tapi ini safety net
+                    self._release_active_job_quantity(order_id, sku_id, request['qty'])
                     continue
             
                 self.assign_order_df.loc[((self.assign_order_df['order_id'] == order.id) & (self.assign_order_df['item_id'] == sku_id)), 'assigned_pod'] = int(available_pod.pod_number)
@@ -1570,7 +1974,18 @@ class Warehouse:
 
         # 6. Setelah loop selesai, bersihkan semua permintaan yang sudah jadi Job
         if processed_requests:
-            self.sku_picking_queue = [req for req in self.sku_picking_queue if req not in processed_requests]
+            processed_counter = Counter(
+                (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+                for req in processed_requests
+            )
+            rebuilt_queue = []
+            for req in self.sku_picking_queue:
+                key = (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+                if processed_counter.get(key, 0) > 0:
+                    processed_counter[key] -= 1
+                    continue
+                rebuilt_queue.append(req)
+            self._replace_sku_picking_queue(rebuilt_queue)
             # print(f"✅ Batch assigned {len(jobs_created_this_tick)} jobs for {len(processed_requests)} SKU requests.")
 
     def assignJobsInBatches_MODIFIED(self):
@@ -1597,12 +2012,18 @@ class Warehouse:
         
         # Simpan request yang pod-nya nggak ketemu/sibuk untuk ditaruh lagi di antrian
         unprocessed_requests = [] 
+        dropped_requests = []
 
         for request in self.sku_picking_queue:
             sku_id = request['sku']
             order = self.order_manager.getOrderById(request['order_id'])
-            if order is None or order.station_id is None:
-                unprocessed_requests.append(request)
+            if order is None:
+                dropped_requests.append(request)
+                continue
+
+            if order.station_id is None:
+                order.is_in_queue = False
+                dropped_requests.append(request)
                 continue
 
             order_station = self.station_manager.getStationById(order.station_id)
@@ -1683,7 +2104,7 @@ class Warehouse:
                         continue
 
                     order.commitQuantity(req['sku'], req['qty'])
-                    job.addPickingTask(req['order_id'], req['sku'], req['qty'])
+                    self._add_picking_task_to_job(job, req['order_id'], req['sku'], req['qty'])
 
                     # Update DataFrame atau status tracking lo
                     self.assign_order_df.loc[((self.assign_order_df['order_id'] == req['order_id']) & (self.assign_order_df['item_id'] == req['sku'])), 'assigned_pod'] = int(pod_object.pod_number)
@@ -1703,7 +2124,33 @@ class Warehouse:
                 unprocessed_requests.extend(pod_requests)
 
         # 4. Update antrian utama: buang yang sudah diproses, sisakan yang belum
-        self.sku_picking_queue = unprocessed_requests + [req for req in self.sku_picking_queue if req not in processed_requests and req not in unprocessed_requests]
+        processed_counter = Counter(
+            (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+            for req in processed_requests
+        )
+        unprocessed_counter = Counter(
+            (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+            for req in unprocessed_requests
+        )
+        dropped_counter = Counter(
+            (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+            for req in dropped_requests
+        )
+        remaining_requests = []
+        for req in self.sku_picking_queue:
+            key = (req.get("order_id"), req.get("sku"), req.get("qty", 0))
+            if processed_counter.get(key, 0) > 0:
+                processed_counter[key] -= 1
+                continue
+            if unprocessed_counter.get(key, 0) > 0:
+                unprocessed_counter[key] -= 1
+                continue
+            if dropped_counter.get(key, 0) > 0:
+                dropped_counter[key] -= 1
+                continue
+            remaining_requests.append(req)
+
+        self._replace_sku_picking_queue(unprocessed_requests + remaining_requests)
 
     # ================= LOGIKA BARU END ===================
 
@@ -1763,23 +2210,18 @@ class Warehouse:
             
     def update_global_sku_watchlist(self):
         """
-        Fungsi ini nge-scan semua SKU di gudang dan bikin daftar mana aja
-        yang stoknya tipis secara global.
+        Rebuild the global watchlist from warehouse inventory ratio metadata.
         """
-        self.global_critical_skus = set()  # Pake 'set' biar cepet ngeceknya nanti
-
-        all_skus_data = self.pod_manager.getAllSKUData() # Ambil data semua SKU
+        self.global_critical_skus = set()
+        all_skus_data = self.pod_manager.getAllSKUData()
 
         for sku_id, data in all_skus_data.items():
-            max_qty = data['max_global_qty']
-            if max_qty <= 0:
+            threshold_ratio = float(data.get("global_threshold_inv_level", 0))
+            if threshold_ratio <= 0:
                 continue
 
-            # Hitung level kesehatan global (Ui)
-            global_level = data['current_global_qty'] / max_qty
-            
-            # Kalo di bawah ambang batas, masukin ke daftar kritis
-            if global_level < self.global_watchlist_threshold:
+            current_global_ratio = float(data.get("global_inv_level", 0))
+            if current_global_ratio <= threshold_ratio:
                 self.global_critical_skus.add(sku_id)
 
     def get_pod_average_fill_score(self, pod: Pod) -> float:
@@ -1801,36 +2243,249 @@ class Warehouse:
 
         return total_inventory_level / counted_skus
 
+    def get_below_reorder_skus_for_pod(self, pod: Pod) -> List[int]:
+        if pod is None or not pod.skus:
+            return []
+
+        critical_skus = []
+        for sku_id in pod.skus.keys():
+            _, needs_replenishment = self.pod_manager.isSKUNeedReplenishment(sku_id)
+            if needs_replenishment:
+                self.global_critical_skus.add(sku_id)
+                critical_skus.append(sku_id)
+
+        return sorted(critical_skus)
+
+    def get_pod_critical_fill_score(
+        self,
+        pod: Pod,
+        critical_skus: Optional[List[int]] = None,
+    ) -> float:
+        if pod is None or not pod.skus:
+            return 1.0
+
+        if critical_skus is None:
+            critical_skus = self.get_below_reorder_skus_for_pod(pod)
+
+        if not critical_skus:
+            return 1.0
+
+        fill_ratios = []
+        for sku_id in critical_skus:
+            details = pod.skus.get(sku_id)
+            if not details:
+                continue
+
+            limit_qty = details.get("limit_qty", 0)
+            if limit_qty <= 0:
+                continue
+
+            current_qty = details.get("current_qty", 0)
+            fill_ratios.append(max(0.0, min(1.0, current_qty / limit_qty)))
+
+        if not fill_ratios:
+            return 1.0
+
+        return float(sum(fill_ratios) / len(fill_ratios))
+
     def get_replenishment_skus_for_pod(self, pod: Pod) -> tuple[list, float]:
         """
-        Shared replenishment rule used by both the post-pick trigger and the
-        periodic idle-pod sweep.
-
-        Returns a tuple of:
-        - list of SKUs to replenish
-        - the pod average-fill score (Qj)
+        Returns the below-reorder SKUs that make this pod eligible for
+        replenishment, using Qj_critical as the binary pod-level gate.
         """
         if pod is None or not pod.skus:
             return [], 1.0
 
-        qj_score = self.get_pod_average_fill_score(pod)
+        critical_skus = self.get_below_reorder_skus_for_pod(pod)
+        qj_score = self.get_pod_critical_fill_score(pod, critical_skus)
         if qj_score >= self.pod_replenishment_threshold:
             return [], qj_score
 
-        pod_sku_set = set(pod.skus.keys())
-        skus_to_replenish = sorted(pod_sku_set.intersection(self.global_critical_skus))
-        return skus_to_replenish, qj_score
+        return critical_skus, qj_score
+
+    def getPendingReplenishmentDispatch(self, pod_number: int) -> Optional[Dict]:
+        for request in self.pending_replenishment_dispatches:
+            if int(request["pod_number"]) == int(pod_number):
+                return request
+        return None
+
+    def getPendingReplenishmentRequestForSKU(self, sku_id: int) -> Optional[Dict]:
+        for request in self.pending_replenishment_dispatches:
+            if sku_id in request.get("skus_to_replenish", []):
+                return request
+        return None
+
+    def hasOnHoldDemandForSKUs(self, skus_to_check) -> bool:
+        target_skus = {sku for sku in skus_to_check if sku}
+        if not target_skus:
+            return False
+
+        for order in self.order_manager.unfinished_orders:
+            if not getattr(order, "on_hold", False):
+                continue
+
+            remaining_skus = order.getRemainingSKU()
+            if any(sku in remaining_skus for sku in target_skus):
+                return True
+
+        return False
+
+    def hasActiveQueueDemandForSKUs(self, skus_to_check) -> bool:
+        target_skus = {sku for sku in skus_to_check if sku}
+        if not target_skus:
+            return False
+
+        return any(
+            request.get("sku") in target_skus and request.get("qty", 0) > 0
+            for request in self.sku_picking_queue
+        )
+
+    def getReplenishmentUrgencyLevel(self, skus_to_check) -> int:
+        if self.hasOnHoldDemandForSKUs(skus_to_check):
+            return 2
+        if self.hasActiveQueueDemandForSKUs(skus_to_check):
+            return 1
+        return 0
+
+    def shouldGuaranteeReplenishmentRequest(
+        self,
+        request: Optional[Dict],
+        current_tick: Optional[int] = None,
+    ) -> bool:
+        if request is None:
+            return False
+
+        if current_tick is None:
+            current_tick = int(self._tick)
+
+        if bool(request.get("guaranteed_on_release", False)):
+            return True
+
+        wait_time = current_tick - int(request.get("created_tick", current_tick))
+        return wait_time >= self.replenishment_dispatch_aging_ticks
+
+    def getMostDepletedEligiblePodForSKU(self, sku_id: int):
+        pods_with_sku = self.pod_manager.getPodsBySKU(sku_id) or []
+        best_candidate = None
+        best_key = None
+
+        for pod in pods_with_sku:
+            if pod is None or pod.is_awaiting_replenishment:
+                continue
+
+            skus_to_replenish, qj_score = self.get_replenishment_skus_for_pod(pod)
+            if not skus_to_replenish or sku_id not in skus_to_replenish:
+                continue
+
+            sku_details = pod.skus.get(sku_id, {})
+            sku_limit_qty = sku_details.get("limit_qty", 0)
+            sku_current_qty = sku_details.get("current_qty", 0)
+            sku_fill_ratio = (
+                sku_current_qty / sku_limit_qty
+                if sku_limit_qty > 0
+                else 1.0
+            )
+            idle_penalty = 0 if pod.is_idle else 1
+            candidate_key = (
+                qj_score,
+                sku_fill_ratio,
+                idle_penalty,
+                int(pod.pod_number),
+            )
+
+            if best_key is None or candidate_key < best_key:
+                best_key = candidate_key
+                best_candidate = (pod, skus_to_replenish, qj_score)
+
+        return best_candidate
+
+    def enqueueBestReplenishmentDispatchForSKU(self, sku_id: int) -> bool:
+        existing_request = self.getPendingReplenishmentRequestForSKU(sku_id)
+        if existing_request is not None:
+            try:
+                existing_pod = self.pod_manager.getPodByNumber(
+                    int(existing_request["pod_number"])
+                )
+            except (IndexError, TypeError):
+                existing_pod = None
+
+            if existing_pod is not None:
+                return self.enqueuePendingReplenishmentDispatch(
+                    existing_pod,
+                    existing_request.get("skus_to_replenish", []),
+                )
+            return False
+
+        candidate = self.getMostDepletedEligiblePodForSKU(sku_id)
+        if candidate is None:
+            return False
+
+        pod, skus_to_replenish, _ = candidate
+        return self.enqueuePendingReplenishmentDispatch(pod, skus_to_replenish)
+
+    def refreshMandatoryReplenishmentPods(self):
+        current_tick = int(self._tick)
+
+        for pod in self.pod_manager.getAllPods():
+            if pod is None or pod.is_awaiting_replenishment:
+                continue
+            pod.must_replenish_before_pick = False
+
+        for request in self.pending_replenishment_dispatches:
+            if not self.shouldGuaranteeReplenishmentRequest(request, current_tick):
+                continue
+
+            try:
+                pod = self.pod_manager.getPodByNumber(int(request["pod_number"]))
+            except (IndexError, TypeError):
+                pod = None
+
+            if pod is not None and not pod.is_awaiting_replenishment:
+                pod.must_replenish_before_pick = True
+
+    def tryGuaranteeReplenishmentOnRelease(self, pod: Pod, robot: Robot) -> bool:
+        if pod is None or robot is None:
+            return False
+
+        request = self.getPendingReplenishmentDispatch(pod.pod_number)
+        if request is None:
+            return False
+
+        if not self.shouldGuaranteeReplenishmentRequest(request, int(self._tick)):
+            return False
+
+        skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
+        if not skus_to_replenish:
+            self.removePendingReplenishmentDispatch(pod.pod_number)
+            return False
+
+        station = self.station_manager.findAvailableReplenishmentStation()
+        if station is None:
+            pod.must_replenish_before_pick = True
+            return False
+
+        success = self.sendPodForReplenishment(
+            pod,
+            station,
+            skus_to_replenish,
+            robot,
+        )
+        if not success:
+            pod.must_replenish_before_pick = True
+        return success
     
     def trigger_bundled_proactive_replenishment(self, pod: Pod, robot: Robot):
         """
-        Mengecek "kesehatan rata-rata" sebuah pod dan mengirimnya untuk 
-        replenishment JIKA skornya di bawah threshold.
-        Hanya me-replenish SKU yang ada di daftar kritis global.
+        After a picking job finishes on a pod, revisit any SKUs in that pod
+        that have crossed their reorder point and enqueue one replenishment
+        request per critical SKU using the single-most-depleted eligible pod.
         """
-        skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
-        if not skus_to_replenish:
+        if pod is None:
             return
 
-        available_station = self.station_manager.findAvailableReplenishmentStation()
-        if available_station:
-            self.sendPodForReplenishment(pod, available_station, skus_to_replenish, robot)
+        critical_skus = self.get_below_reorder_skus_for_pod(pod)
+        if not critical_skus:
+            return
+
+        for sku_id in critical_skus:
+            self.enqueueBestReplenishmentDispatchForSKU(sku_id)

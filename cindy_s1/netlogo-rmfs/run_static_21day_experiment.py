@@ -101,6 +101,12 @@ def run_experiment(
     throughput_per_hour = (
         warehouse.orders_fulfilled / elapsed_hours if elapsed_hours > 0 else 0.0
     )
+    delivered_order_lines = int(getattr(warehouse, "delivered_order_lines", 0))
+    picked_units = int(getattr(warehouse, "total_picked_units", 0))
+    pod_visits = int(warehouse.pod_visit_to_station)
+    total_energy = float(warehouse.total_energy)
+    total_fixed_load_energy = float(warehouse.total_fixed_load_energy)
+    variable_energy = max(0.0, total_energy - total_fixed_load_energy)
 
     summary = pd.DataFrame(
         [
@@ -118,12 +124,13 @@ def run_experiment(
                 ),
             },
             {"metric": "last_order_arrival_tick", "value": int(getattr(warehouse, "last_order_arrival", 0))},
-            {"metric": "total_energy", "value": float(warehouse.total_energy)},
-            {"metric": "total_fixed_load_energy", "value": float(warehouse.total_fixed_load_energy)},
+            {"metric": "total_energy", "value": total_energy},
+            {"metric": "total_fixed_load_energy", "value": total_fixed_load_energy},
+            {"metric": "variable_energy", "value": variable_energy},
             {
                 "metric": "energy_per_fulfilled_order",
                 "value": (
-                    warehouse.total_energy / warehouse.orders_fulfilled
+                    total_energy / warehouse.orders_fulfilled
                     if warehouse.orders_fulfilled > 0
                     else 0.0
                 ),
@@ -131,8 +138,16 @@ def run_experiment(
             {
                 "metric": "fixed_energy_per_fulfilled_order",
                 "value": (
-                    warehouse.total_fixed_load_energy / warehouse.orders_fulfilled
+                    total_fixed_load_energy / warehouse.orders_fulfilled
                     if warehouse.orders_fulfilled > 0
+                    else 0.0
+                ),
+            },
+            {
+                "metric": "variable_energy_per_delivered_line",
+                "value": (
+                    variable_energy / delivered_order_lines
+                    if delivered_order_lines > 0
                     else 0.0
                 ),
             },
@@ -141,7 +156,37 @@ def run_experiment(
             {"metric": "total_turning", "value": float(warehouse.total_turning)},
             {"metric": "replenishment_count", "value": int(warehouse.replenishment_count)},
             {"metric": "replenishment_trips", "value": int(warehouse.replenishment_trips)},
-            {"metric": "pod_visit_to_station", "value": int(warehouse.pod_visit_to_station)},
+            {"metric": "pod_visit_to_station", "value": pod_visits},
+            {"metric": "delivered_order_lines", "value": delivered_order_lines},
+            {"metric": "picked_units", "value": picked_units},
+            {
+                "metric": "delivered_order_lines_per_pod_visit",
+                "value": (
+                    delivered_order_lines / pod_visits
+                    if pod_visits > 0
+                    else 0.0
+                ),
+            },
+            {
+                "metric": "picked_units_per_pod_visit",
+                "value": (
+                    picked_units / pod_visits
+                    if pod_visits > 0
+                    else 0.0
+                ),
+            },
+            {
+                "metric": "energy_per_pod_visit",
+                "value": (total_energy / pod_visits) if pod_visits > 0 else 0.0,
+            },
+            {
+                "metric": "variable_energy_per_pod_visit",
+                "value": (
+                    variable_energy / pod_visits
+                    if pod_visits > 0
+                    else 0.0
+                ),
+            },
             {"metric": "average_inventory_level", "value": float(warehouse.average_inventory_level)},
             {"metric": "average_pod_inventory_level", "value": float(warehouse.average_pod_inventory_level)},
             {
