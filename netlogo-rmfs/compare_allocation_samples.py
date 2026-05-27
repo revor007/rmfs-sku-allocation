@@ -21,6 +21,7 @@ from prepare_static_21day_inputs import (
 def load_cindy_candidate_items(
     items_path: Path,
     max_comp_path: Path,
+    eligible_master_path: Path | None = None,
 ) -> pd.DataFrame:
     items = pd.read_csv(items_path)
     max_comp = pd.read_csv(max_comp_path)
@@ -47,7 +48,8 @@ def load_cindy_candidate_items(
         max_comp["standard_slot_capacity"], errors="coerce"
     )
 
-    eligible_master_path = FCGMA_DIR / "eligible_master_skus.csv"
+    if eligible_master_path is None:
+        eligible_master_path = FCGMA_DIR / "eligible_master_skus.csv"
     eligible_skus: set[str] | None = None
     if eligible_master_path.exists():
         eligible_master = pd.read_csv(eligible_master_path)
@@ -99,6 +101,39 @@ def load_target_budget_from_allocation(
     return dict(zip(target_budget["item_code"], target_budget["target_quantity"]))
 
 
+def normalize_target_budget(
+    target_quantity_by_sku: dict[str, int] | None,
+) -> dict[str, int]:
+    if target_quantity_by_sku is None:
+        return {}
+
+    return {
+        normalize_item_code(item_code): int(np.ceil(quantity))
+        for item_code, quantity in target_quantity_by_sku.items()
+        if normalize_item_code(item_code) and quantity is not None
+    }
+
+
+def build_slot_quantities(total_quantity: int, slot_capacity: int, slots_needed: int) -> list[int]:
+    total_quantity = int(max(0, total_quantity))
+    slot_capacity = int(max(1, slot_capacity))
+    slots_needed = int(max(0, slots_needed))
+    if slots_needed <= 0:
+        return []
+
+    full_slots, remainder = divmod(total_quantity, slot_capacity)
+    quantities = [slot_capacity] * int(full_slots)
+    if remainder > 0:
+        quantities.append(int(remainder))
+
+    if len(quantities) < slots_needed:
+        quantities.extend([slot_capacity] * (slots_needed - len(quantities)))
+    elif len(quantities) > slots_needed:
+        quantities = quantities[:slots_needed]
+
+    return quantities
+
+
 def build_cindy_baseline_allocation(
     items_path: Path,
     max_comp_path: Path,
@@ -106,6 +141,7 @@ def build_cindy_baseline_allocation(
     required_item_codes: set[str],
     target_quantity_by_sku: dict[str, int] | None = None,
     class_slot_counts: dict[str, int] | None = None,
+    eligible_master_path: Path | None = None,
 ) -> Path:
     if class_slot_counts is None:
         class_slot_counts = {"A": 12, "B": 21, "C": 7}
@@ -192,6 +228,95 @@ def build_cindy_baseline_allocation(
                         "slot": int(slot),
                         "item": row["item_code"],
                         "quantity_in_that_slot": qty_per_slot,
+                    }
+                )
+            pool_index += slots_needed
+
+    allocation = pd.DataFrame(records)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    allocation.to_csv(output_path, index=False)
+    return output_path
+
+
+def build_cindy_scenario2_allocation(
+    items_path: Path,
+    max_comp_path: Path,
+    output_path: Path,
+    required_item_codes: set[str],
+    target_quantity_by_sku: dict[str, int] | None = None,
+    slots_per_pod: int = 40,
+    eligible_master_path: Path | None = None,
+) -> Path:
+    items = load_cindy_candidate_items(
+        items_path=items_path,
+        max_comp_path=max_comp_path,
+        eligible_master_path=eligible_master_path,
+    )
+    required_item_codes = {
+        normalize_item_code(code) for code in required_item_codes if normalize_item_code(code)
+    }
+    items = items[items["item_code"].isin(required_item_codes)].copy()
+
+    if target_quantity_by_sku is not None:
+        normalized_budget = normalize_target_budget(target_quantity_by_sku)
+        items["item_initial_quantity_inventory"] = items["item_code"].map(normalized_budget)
+        items = items[
+            pd.to_numeric(items["item_initial_quantity_inventory"], errors="coerce").fillna(0) > 0
+        ].copy()
+
+    missing_required = sorted(required_item_codes - set(items["item_code"]))
+    if missing_required:
+        preview = ", ".join(missing_required[:10])
+        raise ValueError(
+            f"Cindy Scenario 2 rebuild is missing {len(missing_required)} required sampled SKUs, for example: {preview}"
+        )
+
+    items["item_class"] = items["item_class"].astype(str).str.strip()
+    items["slots_needed"] = np.ceil(
+        items["item_initial_quantity_inventory"] / items["standard_slot_capacity"]
+    ).astype(int)
+    items = items.sort_values(
+        ["item_class", "item_order_frequency", "item_code"],
+        ascending=[True, False, True],
+        kind="stable",
+    ).copy()
+
+    records: list[dict[str, int | str]] = []
+    next_pod_id = 1
+    for item_class in ["A", "B", "C"]:
+        class_items = items[items["item_class"] == item_class].copy()
+        if class_items.empty:
+            continue
+
+        pod_pool: list[tuple[int, int]] = []
+        class_total_slots = int(class_items["slots_needed"].sum())
+        pods_required = max(1, int(np.ceil(class_total_slots / slots_per_pod)))
+        for pod in range(next_pod_id, next_pod_id + pods_required):
+            pod_pool.extend((pod, slot) for slot in range(1, slots_per_pod + 1))
+        next_pod_id += pods_required
+
+        pool_index = 0
+        for _, row in class_items.iterrows():
+            slots_needed = int(row["slots_needed"])
+            if pool_index + slots_needed > len(pod_pool):
+                raise ValueError(
+                    f"Scenario 2 rebuild ran out of {item_class}-class slots for SKU {row['item_code']}."
+                )
+
+            slot_quantities = build_slot_quantities(
+                total_quantity=int(row["item_initial_quantity_inventory"]),
+                slot_capacity=int(row["standard_slot_capacity"]),
+                slots_needed=slots_needed,
+            )
+            for (pod, slot), qty_per_slot in zip(
+                pod_pool[pool_index : pool_index + slots_needed], slot_quantities
+            ):
+                records.append(
+                    {
+                        "pod": int(pod),
+                        "slot": int(slot),
+                        "item": row["item_code"],
+                        "quantity_in_that_slot": int(qty_per_slot),
                     }
                 )
             pool_index += slots_needed
