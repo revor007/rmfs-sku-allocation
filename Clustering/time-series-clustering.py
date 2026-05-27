@@ -54,7 +54,7 @@ def build_normalized_frequency_pattern_matrix(freq_matrix: pd.DataFrame) -> np.n
     values = freq_matrix.to_numpy(dtype=float)
     row_sum = values.sum(axis=1, keepdims=True)
     pattern_values = values / np.maximum(row_sum, 1e-12)
-    return values
+    return pattern_values
 
 def wcsse_score(values: np.ndarray, labels: np.ndarray) -> float:
     total = 0.0
