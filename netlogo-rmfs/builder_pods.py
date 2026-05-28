@@ -134,6 +134,384 @@ def build_slot_quantities(total_quantity: int, slot_capacity: int, slots_needed:
     return quantities
 
 
+
+def _find_cindy_profile_column(columns, candidates: list[str]) -> str:
+    normalized = {
+        str(col).replace("\ufeff", "").strip().lower(): col
+        for col in columns
+    }
+
+    for candidate in candidates:
+        key = candidate.lower()
+        if key in normalized:
+            return normalized[key]
+
+    for candidate in candidates:
+        key = candidate.lower()
+        for normalized_name, original_name in normalized.items():
+            if key in normalized_name:
+                return original_name
+
+    raise KeyError(
+        f"Could not find any of {candidates} in columns {list(columns)}"
+    )
+
+
+def _read_cindy_profile_csv(path: Path) -> pd.DataFrame:
+    try:
+        df = pd.read_csv(path, encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        df = pd.read_csv(path)
+
+    if len(df.columns) == 1:
+        try:
+            semicolon_df = pd.read_csv(
+                path,
+                sep=";",
+                decimal=",",
+                encoding="utf-8-sig",
+                engine="python",
+            )
+            if len(semicolon_df.columns) > 1:
+                return semicolon_df
+        except Exception:
+            pass
+
+    return df
+
+
+def load_minimum_inventory_profile(minimum_inventory_path: Path) -> dict[str, int]:
+    if not minimum_inventory_path.exists():
+        raise FileNotFoundError(
+            f"Minimum inventory file does not exist: {minimum_inventory_path}"
+        )
+
+    minimum_inventory = _read_cindy_profile_csv(minimum_inventory_path)
+    item_col = _find_cindy_profile_column(
+        minimum_inventory.columns,
+        ["item_code", "item code", "item", "sku", "sku_id"],
+    )
+
+    quantity_candidates = [
+        "minimum_inventory",
+        "minimum inventory",
+        "minimum_inventory_quantity",
+        "minimum inventory quantity",
+        "target_quantity",
+        "target quantity",
+        "quantity",
+        "qty",
+        "reorder_point",
+        "rop",
+        "min_stock",
+        "minimum_stock",
+    ]
+    try:
+        quantity_col = _find_cindy_profile_column(
+            minimum_inventory.columns,
+            quantity_candidates,
+        )
+    except KeyError:
+        non_item_cols = [col for col in minimum_inventory.columns if col != item_col]
+        numeric_scores = []
+        for col in non_item_cols:
+            values = pd.to_numeric(
+                minimum_inventory[col].astype(str).str.replace(",", ".", regex=False),
+                errors="coerce",
+            )
+            numeric_scores.append((values.notna().sum(), col))
+        if not numeric_scores or max(numeric_scores)[0] == 0:
+            raise
+        quantity_col = max(numeric_scores)[1]
+
+    profile = minimum_inventory[[item_col, quantity_col]].copy()
+    profile.columns = ["item_code", "target_quantity"]
+    profile["item_code"] = profile["item_code"].map(normalize_item_code)
+    profile["target_quantity"] = pd.to_numeric(
+        profile["target_quantity"].astype(str).str.replace(",", ".", regex=False),
+        errors="coerce",
+    )
+    profile = profile[
+        (profile["item_code"].astype(str).str.strip() != "")
+        & profile["target_quantity"].notna()
+        & (profile["target_quantity"] > 0)
+    ].copy()
+    profile["target_quantity"] = np.ceil(profile["target_quantity"]).astype(int)
+
+    profile = (
+        profile.groupby("item_code", as_index=False)["target_quantity"]
+        .max()
+    )
+    return dict(zip(profile["item_code"], profile["target_quantity"]))
+
+
+def prepare_cindy_baseline_items(
+    items_path: Path,
+    max_comp_path: Path,
+    required_item_codes: set[str],
+    target_quantity_by_sku: dict[str, int] | None = None,
+    eligible_master_path: Path | None = None,
+) -> pd.DataFrame:
+    items = load_cindy_candidate_items(
+        items_path=items_path,
+        max_comp_path=max_comp_path,
+        eligible_master_path=eligible_master_path,
+    )
+    required_item_codes = {
+        normalize_item_code(code)
+        for code in required_item_codes
+        if normalize_item_code(code)
+    }
+    items = items[items["item_code"].isin(required_item_codes)].copy()
+
+    if target_quantity_by_sku is not None:
+        normalized_budget = normalize_target_budget(target_quantity_by_sku)
+        items["item_initial_quantity_inventory"] = items["item_code"].map(
+            normalized_budget
+        )
+        items = items[
+            pd.to_numeric(
+                items["item_initial_quantity_inventory"],
+                errors="coerce",
+            ).fillna(0)
+            > 0
+        ].copy()
+
+    missing_required = sorted(required_item_codes - set(items["item_code"]))
+    if missing_required:
+        preview = ", ".join(missing_required[:10])
+        raise ValueError(
+            f"Cindy Scenario 3 rebuild is missing {len(missing_required)} "
+            f"required sampled SKUs, for example: {preview}"
+        )
+
+    items["item_class"] = items["item_class"].astype(str).str.strip()
+    items["slots_needed"] = np.ceil(
+        items["item_initial_quantity_inventory"] / items["standard_slot_capacity"]
+    ).astype(int)
+    items = items[items["slots_needed"] > 0].copy()
+
+    return items.sort_values(
+        ["item_class", "item_order_frequency", "item_code"],
+        ascending=[True, False, True],
+        kind="stable",
+    ).copy()
+
+
+def build_mixed_class_slot_plan(
+    class_slot_totals: dict[str, int],
+    slots_per_pod: int = 40,
+    class_order: list[str] | None = None,
+) -> pd.DataFrame:
+    if class_order is None:
+        class_order = ["A", "B", "C"]
+
+    remaining = {
+        item_class: int(max(0, class_slot_totals.get(item_class, 0)))
+        for item_class in class_order
+    }
+    total_remaining = int(sum(remaining.values()))
+    if total_remaining <= 0:
+        return pd.DataFrame(columns=["pod", *class_order, "total_slots"])
+
+    records: list[dict[str, int]] = []
+    pod = 1
+    while total_remaining > 0:
+        pod_capacity = min(int(slots_per_pod), total_remaining)
+        raw_counts = {
+            item_class: (
+                remaining[item_class] / total_remaining * pod_capacity
+                if total_remaining > 0
+                else 0.0
+            )
+            for item_class in class_order
+        }
+        counts = {
+            item_class: min(
+                int(np.floor(raw_counts[item_class])),
+                remaining[item_class],
+            )
+            for item_class in class_order
+        }
+
+        open_slots = pod_capacity - sum(counts.values())
+        while open_slots > 0:
+            candidates = [
+                item_class
+                for item_class in class_order
+                if counts[item_class] < remaining[item_class]
+            ]
+            if not candidates:
+                break
+            chosen_class = max(
+                candidates,
+                key=lambda item_class: (
+                    raw_counts[item_class] - np.floor(raw_counts[item_class]),
+                    remaining[item_class] - counts[item_class],
+                    -class_order.index(item_class),
+                ),
+            )
+            counts[chosen_class] += 1
+            open_slots -= 1
+
+        record = {"pod": pod, **counts, "total_slots": int(sum(counts.values()))}
+        records.append(record)
+
+        for item_class in class_order:
+            remaining[item_class] -= counts[item_class]
+        total_remaining = int(sum(remaining.values()))
+        pod += 1
+
+    return pd.DataFrame(records)
+
+
+def build_cindy_scenario3_allocation(
+    items_path: Path,
+    max_comp_path: Path,
+    output_path: Path,
+    required_item_codes: set[str],
+    target_quantity_by_sku: dict[str, int] | None = None,
+    slots_per_pod: int = 40,
+    eligible_master_path: Path | None = None,
+    sku_order_policy: str = "frequency_desc",
+    sku_order_seed: int | None = None,
+) -> Path:
+    items = prepare_cindy_baseline_items(
+        items_path=items_path,
+        max_comp_path=max_comp_path,
+        required_item_codes=required_item_codes,
+        target_quantity_by_sku=target_quantity_by_sku,
+        eligible_master_path=eligible_master_path,
+    )
+
+    class_order = ["A", "B", "C"]
+    class_slot_totals = (
+        items.groupby("item_class")["slots_needed"].sum().astype(int).to_dict()
+    )
+    slot_plan = build_mixed_class_slot_plan(
+        class_slot_totals=class_slot_totals,
+        slots_per_pod=slots_per_pod,
+        class_order=class_order,
+    )
+
+    class_pools: dict[str, list[tuple[int, int]]] = {
+        item_class: [] for item_class in class_order
+    }
+    for _, plan_row in slot_plan.iterrows():
+        pod = int(plan_row["pod"])
+        slot_cursor = 1
+        for item_class in class_order:
+            slots_for_class = int(plan_row.get(item_class, 0))
+            if slots_for_class <= 0:
+                continue
+            class_pools[item_class].extend(
+                (pod, slot)
+                for slot in range(slot_cursor, slot_cursor + slots_for_class)
+            )
+            slot_cursor += slots_for_class
+
+    records: list[dict[str, int | str]] = []
+    for item_class in class_order:
+        pool = class_pools[item_class]
+        pool_index = 0
+        items_of_class = items[items["item_class"] == item_class].copy()
+        items_of_class = order_scenario3_class_items(
+            class_items=items_of_class,
+            item_class=item_class,
+            sku_order_policy=sku_order_policy,
+            sku_order_seed=sku_order_seed,
+        )
+
+        for _, row in items_of_class.iterrows():
+            slots_needed = int(row["slots_needed"])
+            if pool_index + slots_needed > len(pool):
+                raise ValueError(
+                    f"Scenario 3 rebuild ran out of {item_class}-class slots "
+                    f"for SKU {row['item_code']}."
+                )
+
+            slot_quantities = build_slot_quantities(
+                total_quantity=int(row["item_initial_quantity_inventory"]),
+                slot_capacity=int(row["standard_slot_capacity"]),
+                slots_needed=slots_needed,
+            )
+            for (pod, slot), qty_per_slot in zip(
+                pool[pool_index : pool_index + slots_needed],
+                slot_quantities,
+            ):
+                records.append(
+                    {
+                        "pod": int(pod),
+                        "slot": int(slot),
+                        "item": row["item_code"],
+                        "quantity_in_that_slot": int(qty_per_slot),
+                    }
+                )
+            pool_index += slots_needed
+
+    allocation = pd.DataFrame(records)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    allocation.to_csv(output_path, index=False)
+    return output_path
+
+def order_scenario2_class_items(
+    class_items: pd.DataFrame,
+    item_class: str,
+    sku_order_policy: str = "frequency_desc",
+    sku_order_seed: int | None = None,
+) -> pd.DataFrame:
+    class_items = class_items.copy()
+
+    if sku_order_policy == "frequency_desc":
+        return class_items.sort_values(
+            ["item_order_frequency", "item_code"],
+            ascending=[False, True],
+            kind="stable",
+        ).copy()
+
+    if sku_order_policy == "seeded_shuffle":
+        seed_offset = {"A": 0, "B": 1, "C": 2}.get(item_class, 0)
+        random_state = None if sku_order_seed is None else int(sku_order_seed) + seed_offset
+
+        return class_items.sample(
+            frac=1.0,
+            random_state=random_state,
+        ).reset_index(drop=True)
+
+    raise ValueError(
+        f"Unsupported Scenario 2 SKU order policy: {sku_order_policy}"
+    )
+
+
+def order_scenario3_class_items(
+    class_items: pd.DataFrame,
+    item_class: str,
+    sku_order_policy: str = "frequency_desc",
+    sku_order_seed: int | None = None,
+) -> pd.DataFrame:
+    class_items = class_items.copy()
+
+    if sku_order_policy == "frequency_desc":
+        return class_items.sort_values(
+            ["item_order_frequency", "item_code"],
+            ascending=[False, True],
+            kind="stable",
+        ).copy()
+
+    if sku_order_policy == "seeded_shuffle":
+        seed_offset = {"A": 1000, "B": 2000, "C": 3000}.get(item_class, 0)
+        random_state = None if sku_order_seed is None else int(sku_order_seed) + seed_offset
+
+        return class_items.sample(
+            frac=1.0,
+            random_state=random_state,
+        ).reset_index(drop=True)
+
+    raise ValueError(
+        f"Unsupported Scenario 3 SKU order policy: {sku_order_policy}"
+    )
+
+
 def build_cindy_baseline_allocation(
     items_path: Path,
     max_comp_path: Path,
@@ -246,6 +624,8 @@ def build_cindy_scenario2_allocation(
     target_quantity_by_sku: dict[str, int] | None = None,
     slots_per_pod: int = 40,
     eligible_master_path: Path | None = None,
+    sku_order_policy: str = "frequency_desc",
+    sku_order_seed: int | None = None,
 ) -> Path:
     items = load_cindy_candidate_items(
         items_path=items_path,
@@ -287,7 +667,14 @@ def build_cindy_scenario2_allocation(
         class_items = items[items["item_class"] == item_class].copy()
         if class_items.empty:
             continue
-
+        
+        class_items = order_scenario2_class_items(
+        class_items=class_items,
+        item_class=item_class,
+        sku_order_policy=sku_order_policy,
+        sku_order_seed=sku_order_seed,
+)
+        
         pod_pool: list[tuple[int, int]] = []
         class_total_slots = int(class_items["slots_needed"].sum())
         pods_required = max(1, int(np.ceil(class_total_slots / slots_per_pod)))
@@ -627,9 +1014,18 @@ def main():
     )
     parser.add_argument(
         "--baseline-target-source",
-        choices=["cindy", "my_allocation"],
-        default="cindy",
-        help="Use Cindy's original stock targets or copy per-SKU stock targets from the user's allocation.",
+        choices=["cindy", "my_allocation", "minimum_inventory"],
+        default="minimum_inventory",
+        help=(
+            "Use Cindy's original stock targets, copy per-SKU stock targets "
+            "from the user's allocation, or use minimum_inventory.csv."
+        ),
+    )
+    parser.add_argument(
+        "--minimum-inventory",
+        type=Path,
+        default=FCGMA_DIR / "minimum_inventory.csv",
+        help="Path to minimum_inventory.csv used for Scenario 3 baseline stock targets.",
     )
     args = parser.parse_args()
 
@@ -687,9 +1083,11 @@ def main():
     baseline_target_quantity_by_sku = None
     if args.baseline_target_source == "my_allocation":
         baseline_target_quantity_by_sku = load_target_budget_from_allocation(args.my_allocation)
+    elif args.baseline_target_source == "minimum_inventory":
+        baseline_target_quantity_by_sku = load_minimum_inventory_profile(args.minimum_inventory)
 
     baseline_allocation_path = script_dir / "data" / "input" / "scenario3_baseline_allocation.csv"
-    build_cindy_baseline_allocation(
+    build_cindy_scenario3_allocation(
         items_path=cindy_root / "data" / "output" / "items.csv",
         max_comp_path=FCGMA_DIR / "max_comp_number.csv",
         output_path=baseline_allocation_path,
@@ -846,10 +1244,47 @@ def builder_only_main():
     )
     parser.add_argument(
         "--baseline-target-source",
-        choices=["current_items", "my_allocation"],
-        default="current_items",
-        help="Keep per-SKU quantities from --candidate-items, or copy them from --my-allocation.",
+        choices=["current_items", "cindy", "my_allocation", "minimum_inventory"],
+        default="minimum_inventory",
+        help=(
+            "Keep per-SKU quantities from --candidate-items, copy them from "
+            "--my-allocation, or use --minimum-inventory. 'cindy' is kept "
+            "as an alias for current_items."
+        ),
     )
+    
+    parser.add_argument(
+        "--scenario2-sku-order-policy",
+        choices=["frequency_desc", "seeded_shuffle"],
+        default="frequency_desc",
+        help=(
+            "How SKUs are ordered within each Scenario 2 ABC class before "
+            "sequential slot assignment."
+        ),
+    )
+    parser.add_argument(
+        "--scenario2-sku-order-seed",
+        type=int,
+        default=42,
+        help="Seed used when --scenario2-sku-order-policy is seeded_shuffle.",
+    )
+    
+    parser.add_argument(
+        "--scenario3-sku-order-policy",
+        choices=["frequency_desc", "seeded_shuffle"],
+        default="frequency_desc",
+        help=(
+            "How SKUs are ordered within each Scenario 3 ABC class before "
+            "dynamic mixed-class slot assignment."
+        ),
+    )
+    parser.add_argument(
+        "--scenario3-sku-order-seed",
+        type=int,
+        default=42,
+        help="Seed used when --scenario3-sku-order-policy is seeded_shuffle.",
+    )
+
     parser.add_argument(
         "--pod-id-policy",
         choices=["identity", "seeded_shuffle"],
@@ -874,6 +1309,8 @@ def builder_only_main():
         baseline_target_quantity_by_sku = None
         if args.baseline_target_source == "my_allocation":
             baseline_target_quantity_by_sku = load_target_budget_from_allocation(args.my_allocation)
+        elif args.baseline_target_source == "minimum_inventory":
+            baseline_target_quantity_by_sku = load_minimum_inventory_profile(args.minimum_inventory)
 
         default_name = (
             "scenario2_baseline_allocation.csv"
@@ -894,15 +1331,28 @@ def builder_only_main():
                 required_item_codes=required_item_codes,
                 target_quantity_by_sku=baseline_target_quantity_by_sku,
                 eligible_master_path=args.eligible_master,
+                sku_order_policy=args.scenario2_sku_order_policy,
+                sku_order_seed=(
+                    args.scenario2_sku_order_seed
+                    if args.scenario2_sku_order_policy == "seeded_shuffle"
+                    else None
+                ),
             )
-        else:
-            allocation_path = build_cindy_baseline_allocation(
+
+        elif args.scenario == "scenario3_baseline":
+            allocation_path = build_cindy_scenario3_allocation(
                 items_path=args.candidate_items,
                 max_comp_path=args.max_comp,
                 output_path=output_allocation_path,
                 required_item_codes=required_item_codes,
                 target_quantity_by_sku=baseline_target_quantity_by_sku,
                 eligible_master_path=args.eligible_master,
+                sku_order_policy=args.scenario3_sku_order_policy,
+                sku_order_seed=(
+                    args.scenario3_sku_order_seed
+                    if args.scenario3_sku_order_policy == "seeded_shuffle"
+                    else None
+                ),
             )
 
     result = prepare_inputs(
