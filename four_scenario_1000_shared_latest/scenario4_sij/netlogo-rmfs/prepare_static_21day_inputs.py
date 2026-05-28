@@ -173,6 +173,40 @@ def backup_live_files(output_dir: Path) -> Path:
     return backup_dir
 
 
+def apply_pod_id_policy(
+    allocation: pd.DataFrame,
+    policy: str = "identity",
+    seed: int | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    allocation = allocation.copy()
+    source_pods = sorted(int(pod) for pod in allocation["pod"].unique().tolist())
+    canonical_pods = list(range(1, len(source_pods) + 1))
+    canonical_map = dict(zip(source_pods, canonical_pods))
+    allocation["pod"] = allocation["pod"].map(canonical_map).astype(np.int32)
+
+    prepared_pods = canonical_pods.copy()
+    if policy == "seeded_shuffle":
+        rng = np.random.default_rng(seed)
+        rng.shuffle(prepared_pods)
+    elif policy != "identity":
+        raise ValueError(f"Unsupported pod-id policy: {policy}")
+
+    prepared_map = dict(zip(canonical_pods, prepared_pods))
+    allocation["pod"] = allocation["pod"].map(prepared_map).astype(np.int32)
+
+    mapping = pd.DataFrame(
+        {
+            "source_pod": source_pods,
+            "canonical_pod": canonical_pods,
+            "prepared_pod": prepared_pods,
+            "prepared_pod_id": [pod - 1 for pod in prepared_pods],
+            "policy": policy,
+            "seed": "" if seed is None else int(seed),
+        }
+    )
+    return allocation, mapping
+
+
 def prepare_inputs(
     scenario_root: Path,
     allocation_path: Path,
@@ -183,6 +217,8 @@ def prepare_inputs(
     order_path: Path | None = None,
     cutoff_ratio: float | None = None,
     required_coverage_skus: set[str] | None = None,
+    pod_id_policy: str = "identity",
+    pod_id_seed: int | None = None,
 ) -> dict:
     output_dir = scenario_root / "data" / "output"
     input_dir = scenario_root / "data" / "input"
@@ -280,6 +316,11 @@ def prepare_inputs(
         & (allocation["slot"] > 0)
         & (allocation["qty"] > 0)
     ].copy()
+    allocation, pod_id_mapping = apply_pod_id_policy(
+        allocation=allocation,
+        policy=pod_id_policy,
+        seed=pod_id_seed,
+    )
 
     raw_ordered_skus = set(context.order_df["item_code"].unique())
     eligible_ordered_skus = set(context.eligible_skus)
@@ -468,6 +509,7 @@ def prepare_inputs(
     pods_live_path = output_dir / "pods.csv"
     summary_path = output_dir / "cutoff_experiment_input_summary.csv"
     mapping_path = output_dir / "item_code_to_id_cutoff_experiment.csv"
+    pod_mapping_path = output_dir / "pod_id_mapping_cutoff_experiment.csv"
     replay_orders_path = input_dir / "cutoff_test_orders.csv"
 
     items_output.to_csv(items_static_path, index=False)
@@ -475,6 +517,7 @@ def prepare_inputs(
     items_output.to_csv(items_live_path, index=False)
     pods_output.to_csv(pods_live_path, index=False)
     item_master[["item_id", "item_code", "item_name"]].to_csv(mapping_path, index=False)
+    pod_id_mapping.to_csv(pod_mapping_path, index=False)
 
     replay_orders = test_orders[["order_id", "item_code", "quantity", "created_at"]].copy()
     replay_orders.to_csv(replay_orders_path, index=False, sep=";", encoding="utf-8-sig")
@@ -501,6 +544,8 @@ def prepare_inputs(
             {"metric": "occupied_slots", "value": len(pods_output)},
             {"metric": "pods_used", "value": int(pods_output["pod_id"].nunique())},
             {"metric": "physical_pods_available", "value": physical_pod_count},
+            {"metric": "pod_id_policy", "value": pod_id_policy},
+            {"metric": "pod_id_seed", "value": "" if pod_id_seed is None else int(pod_id_seed)},
         ]
     )
     summary.to_csv(summary_path, index=False)
@@ -512,6 +557,7 @@ def prepare_inputs(
         "pods_live_path": pods_live_path,
         "summary_path": summary_path,
         "mapping_path": mapping_path,
+        "pod_mapping_path": pod_mapping_path,
         "replay_orders_path": replay_orders_path,
         "backup_dir": backup_dir,
         "pods_used": int(pods_output["pod_id"].nunique()),
@@ -525,7 +571,7 @@ def prepare_inputs(
 
 def main():
     script_dir = Path(__file__).resolve().parent
-    workspace_dir = script_dir.parents[1]
+    workspace_dir = script_dir.parents[0]
     fcgma_dir = find_existing_directory(
         [
             workspace_dir.parent,
@@ -592,6 +638,18 @@ def main():
         default=None,
         help="Optional cutoff ratio override. Defaults to FCGMA_CUTOFF_RATIO or 0.70.",
     )
+    parser.add_argument(
+        "--pod-id-policy",
+        choices=["identity", "seeded_shuffle"],
+        default="identity",
+        help="How logical pod labels should be mapped to physical RMFS pod ids.",
+    )
+    parser.add_argument(
+        "--pod-id-seed",
+        type=int,
+        default=42,
+        help="Seed used when --pod-id-policy is seeded_shuffle.",
+    )
     args = parser.parse_args()
 
     result = prepare_inputs(
@@ -603,6 +661,8 @@ def main():
         max_comp_path=args.max_comp,
         minimum_inventory_path=args.minimum_inventory,
         cutoff_ratio=args.cutoff_ratio,
+        pod_id_policy=args.pod_id_policy,
+        pod_id_seed=args.pod_id_seed if args.pod_id_policy == "seeded_shuffle" else None,
     )
 
     print("Cutoff-based RMFS inputs prepared successfully.")
@@ -610,6 +670,7 @@ def main():
     print(f"Live items.csv:   {result['items_live_path']}")
     print(f"Live pods.csv:    {result['pods_live_path']}")
     print(f"Replay orders:    {result['replay_orders_path']}")
+    print(f"Pod id mapping:   {result['pod_mapping_path']}")
     print(
         f"Coverage: {result['allocated_skus']} allocated SKUs, "
         f"{result['eligible_ordered_skus']} eligible ordered SKUs, "
