@@ -13,27 +13,29 @@ PRODUCT_DATA_CANDIDATES = [
 ]
 CLUSTERING_DATASET_DIR = BASE_DIR / "Clustering" / "dataset"
 
-ORIGINAL_PRICE_VISUALIZATION_PATH = BASE_DIR / "original_price_distribution.png"
+PRICE_PER_PIECE_VISUALIZATION_PATH = BASE_DIR / "price_per_piece_distribution.png"
 SHELF_LIFE_VISUALIZATION_PATH = BASE_DIR / "shelf_life_distribution.png"
 DISCOUNT_VISUALIZATION_PATH = BASE_DIR / "discount_distribution.png"
 CAPACITY_VISUALIZATION_PATH = BASE_DIR / "clustering_capacity_distribution.png"
 SKEW_SUMMARY_VISUALIZATION_PATH = (
     BASE_DIR / "clustering_dataset_skew_summary.png"
 )
+SKEWNESS_COEFFICIENT_CSV_PATH = BASE_DIR / "skewness_coefficient_summary.csv"
 
-ORIGINAL_PRICE_CANDIDATES = ["original_price"]
+PRICE_PER_PIECE_CANDIDATES = ["price_per_piece"]
 SHELF_LIFE_CANDIDATES = ["shelf_life"]
 ESTIMATED_DISCOUNT_CANDIDATES = ["estimation_discount"]
 CAPACITY_CANDIDATES = ["capacity"]
 CAPACITY_CATEGORY_CANDIDATES = ["capacity_category"]
+CAPACITY_UNIT_CANDIDATES = ["capacity_unit"]
 
 CLUSTERING_SKEW_VARIABLES = {
     "capacity": {
         "label": "Capacity",
         "transform": "identity",
     },
-    "original_price": {
-        "label": "Original Price",
+    "price_per_piece": {
+        "label": "Price per Piece",
         "transform": "identity",
     },
     "estimation_discount": {
@@ -132,12 +134,49 @@ def build_shelf_life_series(series):
     return np.ceil(pd.to_numeric(series, errors="coerce"))
 
 
-def classify_skewness(skewness, threshold=0.35):
+def compute_sample_skewness(series):
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    observation_count = int(len(values))
+    if observation_count < 3:
+        return np.nan, observation_count
+
+    mean_value = float(values.mean())
+    sample_std = float(values.std(ddof=1))
+    if not np.isfinite(sample_std) or sample_std <= 0:
+        return 0.0, observation_count
+
+    standardized = (values - mean_value) / sample_std
+    skewness = (
+        observation_count
+        / ((observation_count - 1) * (observation_count - 2))
+    ) * float(np.sum(standardized ** 3))
+    return float(skewness), observation_count
+
+
+def interpret_skewness(skewness):
+    if pd.isna(skewness):
+        return "Undetermined"
+    if np.isclose(float(skewness), 0.0, atol=1e-12):
+        return "Perfectly symmetrical"
+
+    abs_skewness = abs(float(skewness))
+    if abs_skewness <= 0.5:
+        return "Approximately symmetric"
+
+    direction = "right-skewed" if skewness > 0 else "left-skewed"
+    if abs_skewness <= 1.0:
+        return f"Moderately {direction}"
+    if abs_skewness <= 1.5:
+        return f"Highly {direction}"
+    return f"Extremely {direction}"
+
+
+def classify_skewness(skewness):
     if pd.isna(skewness):
         return "undetermined"
-    if skewness > threshold:
+    if skewness > 0.5:
         return "right_skewed"
-    if skewness < -threshold:
+    if skewness < -0.5:
         return "left_skewed"
     return "approximately_symmetric"
 
@@ -146,7 +185,7 @@ def load_product_data(path):
     df = pd.read_csv(path, sep=";", encoding="utf-8-sig", decimal=",")
 
     columns = {
-        "original_price": find_column(df.columns, ORIGINAL_PRICE_CANDIDATES),
+        "price_per_piece": find_column(df.columns, PRICE_PER_PIECE_CANDIDATES),
         "shelf_life": find_column(df.columns, SHELF_LIFE_CANDIDATES),
         "discount_estimated": find_column(
             df.columns,
@@ -158,11 +197,16 @@ def load_product_data(path):
             CAPACITY_CATEGORY_CANDIDATES,
             required=False,
         ),
+        "capacity_unit": find_column(
+            df.columns,
+            CAPACITY_UNIT_CANDIDATES,
+            required=False,
+        ),
     }
 
     df = df.copy()
-    df[columns["original_price"]] = pd.to_numeric(
-        df[columns["original_price"]],
+    df[columns["price_per_piece"]] = pd.to_numeric(
+        df[columns["price_per_piece"]],
         errors="coerce",
     )
     df[columns["shelf_life"]] = pd.to_numeric(
@@ -184,6 +228,14 @@ def load_product_data(path):
     if columns["capacity_category"] is not None:
         df[columns["capacity_category"]] = (
             df[columns["capacity_category"]]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.lower()
+        )
+    if columns["capacity_unit"] is not None:
+        df[columns["capacity_unit"]] = (
+            df[columns["capacity_unit"]]
             .fillna("")
             .astype(str)
             .str.strip()
@@ -221,9 +273,12 @@ def summarize_clustering_dataset_shapes(dataset_files):
             if values.empty:
                 skewness = np.nan
                 shape = "undetermined"
+                interpretation = "Undetermined"
+                observation_count = 0
             else:
-                skewness = float(values.skew())
+                skewness, observation_count = compute_sample_skewness(values)
                 shape = classify_skewness(skewness)
+                interpretation = interpret_skewness(skewness)
 
             summary_rows.append(
                 {
@@ -232,7 +287,8 @@ def summarize_clustering_dataset_shapes(dataset_files):
                     "variable_label": config["label"],
                     "skewness": skewness,
                     "shape": shape,
-                    "observation_count": int(len(values)),
+                    "interpretation": interpretation,
+                    "observation_count": int(observation_count),
                 }
             )
 
@@ -253,19 +309,72 @@ def format_stat(value):
 
 
 def describe_distribution_shape(skewness, mean_value, median_value, std_value):
-    if pd.isna(skewness):
-        return "Undetermined"
+    return interpret_skewness(skewness)
 
-    scale = std_value if std_value and std_value > 0 else max(abs(mean_value), 1.0)
-    mean_median_gap = abs(mean_value - median_value)
 
-    if abs(skewness) < 0.35 and mean_median_gap <= 0.1 * scale:
-        return "Approximately symmetric"
-    if skewness >= 0.35:
-        return "Right-skewed"
-    if skewness <= -0.35:
-        return "Left-skewed"
-    return "Mild skew"
+def build_skewness_coefficient_summary(df, columns):
+    summary_rows = []
+
+    def append_row(feature_label, series):
+        skewness, observation_count = compute_sample_skewness(series)
+        summary_rows.append(
+            {
+                "Features/Attribute": feature_label,
+                "Skewness Coefficient": skewness,
+                "Interpretation": interpret_skewness(skewness),
+                "Observation Count": observation_count,
+            }
+        )
+
+    append_row("price_per_piece", df[columns["price_per_piece"]])
+    append_row("estimation_discount", df["_discount_percent"])
+    append_row("shelf_life (ceiled)", df["_shelf_life_ceiled"])
+
+    capacity_col = columns.get("capacity")
+    if capacity_col is not None:
+        capacity_df = df[[capacity_col]].copy()
+        capacity_df["capacity"] = pd.to_numeric(df[capacity_col], errors="coerce")
+
+        category_col = columns.get("capacity_category")
+        if category_col is not None:
+            capacity_df["capacity_group"] = (
+                df[category_col].fillna("").astype(str).str.strip().str.lower()
+            )
+        else:
+            capacity_df["capacity_group"] = "all"
+
+        capacity_df = capacity_df.dropna(subset=["capacity"]).copy()
+        capacity_df = capacity_df[capacity_df["capacity_group"] != ""].copy()
+
+        preferred_unit_order = [
+            "volume", "weight", "count", "length", "all",
+        ]
+        available_groups = capacity_df["capacity_group"].unique().tolist()
+        ordered_groups = [
+            group for group in preferred_unit_order if group in available_groups
+        ]
+        ordered_groups.extend(
+            sorted(group for group in available_groups if group not in ordered_groups)
+        )
+
+        for unit in ordered_groups:
+            append_row(
+                f"capacity ({unit})",
+                capacity_df.loc[capacity_df["capacity_group"] == unit, "capacity"],
+            )
+
+    return pd.DataFrame(summary_rows)
+
+
+def save_skewness_coefficient_summary(summary_df):
+    output_path = get_writable_output_path(SKEWNESS_COEFFICIENT_CSV_PATH)
+    summary_df.to_csv(
+        output_path,
+        index=False,
+        sep=";",
+        encoding="utf-8-sig",
+    )
+    return output_path
 
 
 def plot_numeric_distribution(
@@ -297,7 +406,7 @@ def plot_numeric_distribution(
     mean_value = valid_values.mean()
     median_value = valid_values.median()
     std_value = valid_values.std(ddof=0)
-    skewness = valid_values.skew()
+    skewness, _ = compute_sample_skewness(valid_values)
     shape_label = describe_distribution_shape(
         skewness=skewness,
         mean_value=mean_value,
@@ -392,7 +501,7 @@ def plot_capacity_histogram_on_axis(ax, series, category_label, color):
     mean_value = valid_values.mean()
     median_value = valid_values.median()
     std_value = valid_values.std(ddof=0)
-    skewness = valid_values.skew()
+    skewness, _ = compute_sample_skewness(valid_values)
     shape_label = describe_distribution_shape(
         skewness=skewness,
         mean_value=mean_value,
@@ -467,37 +576,39 @@ def plot_global_capacity_distribution(df, columns):
     if capacity_col is None:
         raise ValueError("The global product dataset does not include a capacity column.")
 
-    category_col = columns.get("capacity_category")
     plot_df = df[[capacity_col]].copy()
     plot_df = plot_df.rename(columns={capacity_col: "capacity"})
     plot_df["capacity"] = pd.to_numeric(plot_df["capacity"], errors="coerce")
 
+    category_col = columns.get("capacity_category")
     if category_col is not None:
-        plot_df["capacity_category"] = (
+        plot_df["capacity_group"] = (
             df[category_col].fillna("").astype(str).str.strip().str.lower()
         )
     else:
-        plot_df["capacity_category"] = "all"
+        plot_df["capacity_group"] = "all"
 
     plot_df = plot_df.dropna(subset=["capacity"]).copy()
-    plot_df = plot_df[plot_df["capacity_category"] != ""].copy()
+    plot_df = plot_df[plot_df["capacity_group"] != ""].copy()
     if plot_df.empty:
         raise ValueError("No valid capacity values were found in the global product dataset.")
 
-    preferred_order = ["volume", "weight", "count", "length", "all"]
+    preferred_order = [
+        "volume", "weight", "count", "length", "all",
+    ]
     ordered_categories = [
-        category for category in preferred_order if category in plot_df["capacity_category"].unique()
+        category for category in preferred_order if category in plot_df["capacity_group"].unique()
     ]
     ordered_categories.extend(
         sorted(
             category
-            for category in plot_df["capacity_category"].unique()
+            for category in plot_df["capacity_group"].unique()
             if category not in ordered_categories
         )
     )
 
     category_frames = [
-        (category, plot_df[plot_df["capacity_category"] == category].copy())
+        (category, plot_df[plot_df["capacity_group"] == category].copy())
         for category in ordered_categories
     ]
     category_frames = [
@@ -520,10 +631,12 @@ def plot_global_capacity_distribution(df, columns):
     total_plotted = 0
     for index, (category, category_df) in enumerate(category_frames):
         axis = axes[index]
-        category_label = CAPACITY_CATEGORY_LABELS.get(
-            category,
-            f"{category.title()} Capacity",
-        )
+        if category in CAPACITY_CATEGORY_LABELS:
+            category_label = CAPACITY_CATEGORY_LABELS[category]
+        elif category == "all":
+            category_label = "Capacity"
+        else:
+            category_label = f"Capacity ({category})"
         plotted_count = plot_capacity_histogram_on_axis(
             axis,
             category_df["capacity"],
@@ -629,8 +742,9 @@ def plot_clustering_skew_summary(summary_df):
             [
                 f"Datasets analyzed: {dataset_count:,}",
                 "Current *_dataset.csv files only",
+                "Price feature uses price_per_piece",
                 "Shelf life is ceiled before skewness",
-                "Shape rule: skewness > 0.35, < -0.35, otherwise symmetric",
+                "Interpretation uses the provided skewness thresholds",
             ]
         ),
         transform=ax.transAxes,
@@ -643,12 +757,12 @@ def plot_clustering_skew_summary(summary_df):
     return save_figure(fig, SKEW_SUMMARY_VISUALIZATION_PATH)
 
 
-def plot_original_price_distribution(series):
+def plot_price_per_piece_distribution(series):
     return plot_numeric_distribution(
         series=series,
-        output_path=ORIGINAL_PRICE_VISUALIZATION_PATH,
-        title="Original Price Distribution",
-        x_label="Original price",
+        output_path=PRICE_PER_PIECE_VISUALIZATION_PATH,
+        title="Price per Piece Distribution",
+        x_label="Price per piece",
         color="#4c78a8",
     )
 
@@ -679,9 +793,13 @@ def main():
     df_product, columns = load_product_data(source_path)
     clustering_dataset_files = find_clustering_dataset_files()
     skew_summary_df = summarize_clustering_dataset_shapes(clustering_dataset_files)
+    skewness_coefficient_df = build_skewness_coefficient_summary(df_product, columns)
+    skewness_coefficient_path = save_skewness_coefficient_summary(
+        skewness_coefficient_df
+    )
 
-    original_price_path = plot_original_price_distribution(
-        df_product[columns["original_price"]]
+    price_per_piece_path = plot_price_per_piece_distribution(
+        df_product[columns["price_per_piece"]]
     )
     shelf_life_path = plot_shelf_life_distribution(df_product["_shelf_life_ceiled"])
     discount_path = plot_discount_distribution(df_product["_discount_percent"])
@@ -689,7 +807,8 @@ def main():
     skew_summary_path = plot_clustering_skew_summary(skew_summary_df)
 
     print(f"Source file: {source_path}")
-    print(f"Original price figure saved to: {original_price_path}")
+    print(f"Skewness coefficient CSV saved to: {skewness_coefficient_path}")
+    print(f"Price per piece figure saved to: {price_per_piece_path}")
     print(f"Shelf life figure saved to: {shelf_life_path}")
     print(f"Discount figure saved to: {discount_path}")
     print(f"Clustering capacity figure saved to: {capacity_path}")

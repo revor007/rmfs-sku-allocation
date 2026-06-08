@@ -80,6 +80,32 @@ MASTER_DIMENSION_RENAME_MAP = {
     "units_per_carton_raw": "units_per_carton",
 }
 
+PRODUCT_EXPORT_NUMERIC_COLUMNS = [
+    "price",
+    "original_price",
+    "capacity",
+    "shelf_life",
+    "order",
+    "pieces_per_package",
+    "price_per_piece",
+    "original_price_per_piece",
+    "estimation_discount",
+    "discount_numeric",
+    "promo_numeric",
+    "carton_length_cm",
+    "carton_width_cm",
+    "carton_height_cm",
+    "carton_weight",
+    "units_per_carton",
+    "inventory_quantity",
+]
+
+ORDER_EXPORT_NUMERIC_COLUMNS = [
+    "quantity",
+    "price_per_piece",
+    "sales",
+]
+
 COUNT_UNIT_MAP = {
     "入組": "set",
     "組": "set",
@@ -108,6 +134,10 @@ UNIT_SYNONYMS = {
     "pcs": "pc",
     "piece": "pc",
     "pieces": "pc",
+    "gx": "g",
+    "kgx": "kg",
+    "mlx": "ml",
+    "lx": "l",
     "btl": "bottle",
     "bottle": "bottle",
     "bottles": "bottle",
@@ -920,6 +950,22 @@ def normalize_original_price(value: object) -> float:
     return pd.to_numeric(raw_value, errors="coerce")
 
 
+def coerce_numeric_export_columns(
+    df: pd.DataFrame,
+    numeric_columns: list[str],
+    round_digits: int = 6,
+) -> pd.DataFrame:
+    coerced = df.copy()
+    for column in numeric_columns:
+        if column not in coerced.columns:
+            continue
+
+        coerced[column] = pd.to_numeric(coerced[column], errors="coerce")
+        if pd.api.types.is_float_dtype(coerced[column]):
+            coerced[column] = coerced[column].round(round_digits)
+    return coerced
+
+
 def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     handled = df.copy()
     handled["pieces_per_package"] = handled["pieces_per_package"].fillna(1)
@@ -966,6 +1012,13 @@ def standardize_capacity(df: pd.DataFrame) -> pd.DataFrame:
         .str.lower()
         .replace(UNIT_SYNONYMS)
     )
+    standardized["package_unit"] = (
+        standardized["package_unit"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .replace(UNIT_SYNONYMS)
+    )
 
     unit_conversion_map = {
         "l": ("ml", 1000.0),
@@ -1000,6 +1053,18 @@ def standardize_capacity(df: pd.DataFrame) -> pd.DataFrame:
         "bowl": "count",
     }
     standardized["capacity_category"] = standardized["capacity_unit"].map(unit_category_map)
+
+    package_unit_category_fallback = {
+        "pc": "count",
+        "bottle": "count",
+    }
+    missing_capacity_category = standardized["capacity_category"].isna() | (
+        standardized["capacity_category"].astype(str).str.strip() == ""
+    )
+    fallback_categories = standardized["package_unit"].map(package_unit_category_fallback)
+    standardized.loc[missing_capacity_category, "capacity_category"] = fallback_categories[
+        missing_capacity_category
+    ]
     return standardized
 
 
@@ -1133,7 +1198,23 @@ def finalize_product_columns(df: pd.DataFrame) -> pd.DataFrame:
         "units_per_carton",
         "inventory_quantity",
     ]
-    return df[final_columns].copy()
+    final_df = df[final_columns].copy()
+    return coerce_numeric_export_columns(final_df, PRODUCT_EXPORT_NUMERIC_COLUMNS)
+
+
+def finalize_order_columns(df: pd.DataFrame) -> pd.DataFrame:
+    ordered_df = df[
+        [
+            "order_id",
+            "item_code",
+            "item_name",
+            "quantity",
+            "created_at",
+            "price_per_piece",
+            "sales",
+        ]
+    ].copy()
+    return coerce_numeric_export_columns(ordered_df, ORDER_EXPORT_NUMERIC_COLUMNS)
 
 
 def build_preprocessed_datasets(
@@ -1191,7 +1272,7 @@ def build_preprocessed_datasets(
 
     return (
         finalize_product_columns(filtered_product_df),
-        filtered_order_df,
+        finalize_order_columns(filtered_order_df),
         split_order_df,
         split_threshold_df,
     )

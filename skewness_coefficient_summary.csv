@@ -1,0 +1,8 @@
+﻿Features/Attribute;Skewness Coefficient;Interpretation;Observation Count
+price_per_piece;10.425863477955739;Extremely right-skewed;4832
+estimation_discount;1.3553549774387714;Highly right-skewed;4833
+shelf_life (ceiled);3.7414392131486363;Extremely right-skewed;4833
+capacity (volume);3.3314118541993234;Extremely right-skewed;1197
+capacity (weight);7.327857119420232;Extremely right-skewed;2613
+capacity (count);6.452744977478995;Extremely right-skewed;974
+capacity (length);-0.9827878735715698;Moderately left-skewed;7
