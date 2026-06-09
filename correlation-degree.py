@@ -3,7 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, save_npz
 
 from experiment_context import (
     expand_pairwise_matrix,
@@ -16,9 +16,14 @@ BASE_DIR = Path(__file__).resolve().parent
 
 JACCARD_OUTPUT_PATH = BASE_DIR / "jaccard_similarity_matrix.csv"
 LEGACY_OUTPUT_PATH = BASE_DIR / "association_matrix_normalized.csv"
+CO_OCCURRENCE_OUTPUT_PATH = BASE_DIR / "co_occurrence_matrix.csv"
+LEGACY_CO_OCCURRENCE_OUTPUT_PATH = BASE_DIR / "association_matrix.csv"
 TOP_PAIRS_OUTPUT_PATH = BASE_DIR / "top_jaccard_pairs.csv"
 JACCARD_BUCKETS_OUTPUT_PATH = BASE_DIR / "jaccard_similarity_buckets.csv"
 JACCARD_VISUALIZATION_PATH = BASE_DIR / "jaccard_similarity_distribution.png"
+ORDER_PRODUCT_INCIDENCE_OUTPUT_PATH = BASE_DIR / "order_product_incidence_matrix.npz"
+ORDER_PRODUCT_INCIDENT_ORDER_LABELS_PATH = BASE_DIR / "order_product_incidence_order_labels.csv"
+ORDER_PRODUCT_INCIDENT_SKU_LABELS_PATH = BASE_DIR / "order_product_incidence_sku_labels.csv"
 
 
 def build_jaccard_matrix(df_order: pd.DataFrame):
@@ -31,7 +36,8 @@ def build_jaccard_matrix(df_order: pd.DataFrame):
     if pairs.empty:
         raise ValueError("No valid order-SKU pairs remained after preprocessing.")
 
-    order_codes = pairs["order_id"].astype("category").cat.codes
+    order_cat = pairs["order_id"].astype("category")
+    order_codes = order_cat.cat.codes
     sku_cat = pairs["item_code"].astype("category")
     sku_codes = sku_cat.cat.codes
 
@@ -56,6 +62,7 @@ def build_jaccard_matrix(df_order: pd.DataFrame):
     )
     np.fill_diagonal(jaccard, 0.0)
 
+    order_labels = order_cat.cat.categories.astype(str)
     sku_labels = sku_cat.cat.categories.astype(str)
 
     co_occurrence_matrix = pd.DataFrame(
@@ -69,7 +76,7 @@ def build_jaccard_matrix(df_order: pd.DataFrame):
         columns=sku_labels,
     ).round(4)
 
-    return pairs, co_occurrence_matrix, jaccard_matrix
+    return pairs, incidence_sparse, order_labels, sku_labels, co_occurrence_matrix, jaccard_matrix
 
 
 def build_top_pairs(co_occurrence_matrix, jaccard_matrix, top_n=20):
@@ -174,6 +181,26 @@ def save_dataframe(df, path, **kwargs):
     return output_path
 
 
+def save_incidence_artifacts(incidence_sparse, order_labels, sku_labels):
+    matrix_output_path = get_writable_output_path(ORDER_PRODUCT_INCIDENCE_OUTPUT_PATH)
+    save_npz(matrix_output_path, incidence_sparse)
+    order_labels_output_path = save_dataframe(
+        pd.DataFrame({"order_id": order_labels}),
+        ORDER_PRODUCT_INCIDENT_ORDER_LABELS_PATH,
+        index=False,
+        encoding="utf-8-sig",
+        sep=";",
+    )
+    sku_labels_output_path = save_dataframe(
+        pd.DataFrame({"item_code": sku_labels}),
+        ORDER_PRODUCT_INCIDENT_SKU_LABELS_PATH,
+        index=False,
+        encoding="utf-8-sig",
+        sep=";",
+    )
+    return matrix_output_path, order_labels_output_path, sku_labels_output_path
+
+
 def main():
     context = load_experiment_context(BASE_DIR)
     save_cutoff_artifacts(context, BASE_DIR)
@@ -182,13 +209,32 @@ def main():
         context.train_eligible_df["item_code"].isin(context.historical_skus)
     ].copy()
 
-    pairs, co_occurrence_matrix, historical_jaccard = build_jaccard_matrix(
+    pairs, incidence_sparse, order_labels, sku_labels, co_occurrence_matrix, historical_jaccard = build_jaccard_matrix(
         df_order=historical_orders,
     )
     jaccard_matrix = expand_pairwise_matrix(historical_jaccard, context.eligible_skus).round(4)
     top_pairs = build_top_pairs(co_occurrence_matrix, historical_jaccard)
     bucket_summary = summarize_jaccard_buckets(historical_jaccard)
 
+    incidence_output_path, order_labels_output_path, sku_labels_output_path = save_incidence_artifacts(
+        incidence_sparse,
+        order_labels,
+        sku_labels,
+    )
+    co_occurrence_output_path = save_dataframe(
+        co_occurrence_matrix,
+        CO_OCCURRENCE_OUTPUT_PATH,
+        encoding="utf-8-sig",
+        sep=";",
+        float_format="%.0f",
+    )
+    legacy_co_occurrence_output_path = save_dataframe(
+        co_occurrence_matrix,
+        LEGACY_CO_OCCURRENCE_OUTPUT_PATH,
+        encoding="utf-8-sig",
+        sep=";",
+        float_format="%.0f",
+    )
     jaccard_output_path = save_dataframe(
         jaccard_matrix,
         JACCARD_OUTPUT_PATH,
@@ -236,6 +282,11 @@ def main():
     print(f"Unique order-SKU pairs: {len(pairs):,}")
     print(f"Historical pre-T orders: {pairs['order_id'].nunique():,}")
     print(f"Historical SKUs in Jaccard: {pairs['item_code'].nunique():,}")
+    print(f"Order-product incidence matrix saved to: {incidence_output_path}")
+    print(f"Order labels saved to: {order_labels_output_path}")
+    print(f"SKU labels saved to: {sku_labels_output_path}")
+    print(f"Co-occurrence matrix saved to: {co_occurrence_output_path}")
+    print(f"Legacy co-occurrence export saved to: {legacy_co_occurrence_output_path}")
     print(f"Jaccard matrix saved to: {jaccard_output_path}")
     print(f"Compatibility export saved to: {legacy_output_path}")
     print(f"Top pairs saved to: {top_pairs_output_path}")
