@@ -14,6 +14,28 @@ MINIMUM_INVENTORY_CANDIDATES = [
 ]
 
 
+def _drop_empty_and_duplicate_codes(df, code_col, numeric_preference_cols=None):
+    df = df.copy()
+    df[code_col] = df[code_col].map(normalize_item_code)
+    df = df[df[code_col].astype(str).str.strip() != ""].copy()
+
+    if not df[code_col].duplicated().any():
+        return df
+
+    numeric_preference_cols = set(numeric_preference_cols or [])
+    agg = {}
+    for column in df.columns:
+        if column == code_col:
+            continue
+        if column in numeric_preference_cols:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+            agg[column] = "max"
+        else:
+            agg[column] = "last"
+
+    return df.groupby(code_col, as_index=False, sort=False).agg(agg)
+
+
 def load_minimum_inventory_frame(path_hint):
     path = Path(path_hint).resolve()
     candidates = [path]
@@ -31,7 +53,11 @@ def load_minimum_inventory_frame(path_hint):
     df = pd.read_csv(path, sep=";", decimal=",", engine="python")
     code_col = find_column(df.columns, ["item_code", "Item Code"])
     value_col = find_column(df.columns, MINIMUM_INVENTORY_CANDIDATES)
-    df[code_col] = df[code_col].map(normalize_item_code)
+    df = _drop_empty_and_duplicate_codes(
+        df,
+        code_col,
+        numeric_preference_cols=[value_col],
+    )
     return df.set_index(code_col), value_col, path
 
 
@@ -259,7 +285,11 @@ def load_data(path_u, path_min_inv, G_scalar, path_max_cap, path_stage1=None, ra
     p_df = pd.read_csv(path_max_cap, sep=None, engine="python")
     p_code_col = find_column(p_df.columns, ["item_code"])
     p_value_col = find_column(p_df.columns, ["max_fit", "max_comp_number"])
-    p_df[p_code_col] = p_df[p_code_col].map(normalize_item_code)
+    p_df = _drop_empty_and_duplicate_codes(
+        p_df,
+        p_code_col,
+        numeric_preference_cols=[p_value_col],
+    )
     p_df = p_df.set_index(p_code_col)
     if p_value_col not in p_df.columns:
         raise KeyError("Column 'max_fit' or 'max_comp_number' was not found in max capacity file.")

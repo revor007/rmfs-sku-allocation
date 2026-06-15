@@ -7,11 +7,11 @@ from experiment_context import get_writable_output_path, load_experiment_context
 
 
 BASE_DIR = Path(__file__).resolve().parent
-OUTPUT_PATH = BASE_DIR / "minimum_inventory.csv"
+OUTPUT_PATH = BASE_DIR / "minimum_inventory_90.csv"
 DETAIL_PATH = BASE_DIR / "minimum_inventory_evaluation.csv"
 
 LEAD_TIME_DAYS = 1
-TARGET_SERVICE_LEVEL = 0.95
+TARGET_SERVICE_LEVEL = 0.85
 
 
 def build_daily_demand_series(order_df: pd.DataFrame) -> dict[str, np.ndarray]:
