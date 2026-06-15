@@ -1,20 +1,3 @@
-﻿metric;value
-cutoff_ratio;0.8095238095238095
-cutoff_timestamp;2021-08-18 00:05:11.428571
-source_order_rows;221169
-source_unique_orders;49526
-source_unique_item_codes;4820
-threshold_skus_available;4820
-inventory_threshold_blocked_lines;5377
-inventory_threshold_blocked_unique_orders;4938
-inventory_threshold_blocked_unique_item_codes;192
-remaining_order_rows;183261
-remaining_unique_orders;44588
-remaining_unique_item_codes;4547
-train_order_rows;141678
-test_order_rows;41583
-train_unique_orders;28874
-test_unique_orders;15714
-train_unique_item_codes;4354
-test_unique_item_codes;3333
-product_overlap_item_codes;3140
+version https://git-lfs.github.com/spec/v1
+oid sha256:747127ee004827996727a2c075ba33d1b563f2ecc01d9432bda7c997461cde78
+size 637

@@ -1,3 +1,5 @@
 association_matrix_normalized.csv filter=lfs diff=lfs merge=lfs -text
 jaccard_similarity_matrix.csv filter=lfs diff=lfs merge=lfs -text
 same_cluster_matrix.csv filter=lfs diff=lfs merge=lfs -text
+*.csv filter=lfs diff=lfs merge=lfs -text
+D:/ITB/Tugas[[:space:]]Akhir/fcgma/Clustering/dtw-sku-distance-matrix.csv filter=lfs diff=lfs merge=lfs -text

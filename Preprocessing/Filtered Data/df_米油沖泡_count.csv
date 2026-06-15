@@ -1,3 +1,3 @@
-﻿title;category;price;brand;specification;query;original_price;original_price_checked;capacity;shelf_life;order;Discount;Promo;item_code;item_code_resolution_status;master_candidate_count;order_supported_master_candidates;capacity_unit;pieces_per_package;package_unit;price_per_piece;original_price_per_piece;estimation_discount;capacity_category;shelf_life_unit;discount_numeric;promo_numeric;carton_length_cm;carton_width_cm;carton_height_cm;carton_weight;units_per_carton;inventory_quantity
-【譽方媽媽】關廟麵 細麵 1200g;米油沖泡;129,0;譽方媽媽;規格：1包;譽方媽媽 關廟細麵1200g;170,0;1;1,0;12,0;7588;24.12%;1;14506164001;unique_master_match;1;1;pack;1;pack;129,0;170,0;24,117647;count;month;24,12;1,0;53,0;37,0;30,0;16,35;12,0;1,0
-食在美好 純素蔬食組 (筍茸海帶芽湯25.5gX8包/一盒、沖泡蔬食米粉60gX4入/一袋、元氣飲4.5gX10入/一袋;米油沖泡;799,0;食在美好;規格：一組;老鍋米粉-純米健康蔬食風味湯米粉60g-4;908,0;1;;12,0;7724;12.00%;1;14508918001;unique_master_match;1;1;pc;1;;799,0;908,0;12,004405;count;month;12,0;1,0;40,0;28,0;19,0;2,356;24,0;78,0
+version https://git-lfs.github.com/spec/v1
+oid sha256:63cd0c535952910f40ae6b89e76fcff18f5f5d4e29dc400b198f7fd586c7553c
+size 1145

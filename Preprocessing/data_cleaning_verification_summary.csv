@@ -1,13 +1,3 @@
-﻿section,dataset,column,metric,value
-verification,product_final,,row_count,4820
-verification,order_final,,row_count,221169
-verification,alignment,,product_unique_item_codes,4820
-verification,alignment,,order_unique_item_codes,4820
-verification,alignment,,product_only_item_codes,0
-verification,alignment,,order_only_item_codes,0
-verification,product_final,item_code,missing_item_code_rows,0
-verification,product_final,item_code,duplicate_item_code_rows,0
-verification,order_final,item_code,missing_item_code_rows,0
-verification,order_final,,exact_duplicate_rows,0
-verification,order_final,created_at,invalid_timestamps,0
-verification,order_final,quantity,nonpositive_quantities,0
+version https://git-lfs.github.com/spec/v1
+oid sha256:0652f77ba8870780f6ee062701a257cb79be7096a9c9872f34f7cf109c9500c5
+size 695

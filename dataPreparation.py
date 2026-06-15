@@ -301,9 +301,11 @@ def load_data(path_u, path_s, path_min_inv, G_scalar, path_max_cap, path_stage1=
         raise KeyError("Column 'max_fit' or 'max_comp_number' was not found in max capacity file.")
 
     eligible_skus = set(load_experiment_context(Path(path_u).resolve().parent).eligible_skus)
+    # Preserve the full optimizer universe from the cutoff-aligned eligible set.
+    # The S matrix can be historical-only, so missing rows/cols are backfilled with 0
+    # instead of shrinking the SKU universe to the S footprint.
     common_skus = sorted(
         set(U_df.index)
-        & set(S_df.index)
         & set(g_df.index)
         & set(p_df.index)
         & eligible_skus
@@ -315,7 +317,7 @@ def load_data(path_u, path_s, path_min_inv, G_scalar, path_max_cap, path_stage1=
         )
 
     U_df = U_df.reindex(index=common_skus, columns=common_skus)
-    S_df = S_df.reindex(index=common_skus, columns=common_skus)
+    S_df = S_df.reindex(index=common_skus, columns=common_skus, fill_value=0)
     g_df = g_df.reindex(index=common_skus)
     p_df = p_df.reindex(index=common_skus)
 
