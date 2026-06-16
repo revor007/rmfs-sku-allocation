@@ -123,84 +123,6 @@ def build_feature_matrix(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     return encoded, feature_columns
 
 
-def build_feature_matrix_for_fallback(candidate_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    encoded = candidate_df.copy()
-    raw_feature_columns = [
-        "Promo",
-        "capacity",
-        "price_per_piece",
-        "estimation_discount",
-        "shelf_life",
-    ]
-
-    for column in raw_feature_columns:
-        encoded[column] = pd.to_numeric(encoded[column], errors="coerce")
-
-    historical_mask = encoded["is_new_product"] == 0
-    for column in raw_feature_columns:
-        fill_value = encoded.loc[historical_mask, column].median()
-        if pd.isna(fill_value):
-            fill_value = encoded[column].median()
-        if pd.isna(fill_value):
-            return pd.DataFrame(), []
-        encoded[column] = encoded[column].fillna(fill_value)
-
-    encoded["shelf_life"] = np.ceil(encoded["shelf_life"])
-    encoded["log_capacity"] = np.log1p(encoded["capacity"].clip(lower=0))
-    encoded["log_price_per_piece"] = np.log1p(encoded["price_per_piece"].clip(lower=0))
-    encoded["log_estimation_discount"] = np.log1p(
-        encoded["estimation_discount"].clip(lower=0)
-    )
-    encoded["log_shelf_life"] = np.log1p(encoded["shelf_life"].clip(lower=0))
-
-    feature_input_columns = [
-        "Promo",
-        "log_capacity",
-        "log_price_per_piece",
-        "log_estimation_discount",
-        "log_shelf_life",
-    ]
-
-    scaler = StandardScaler()
-    feature_columns = [
-        "Promo_normalized",
-        "log_capacity_normalized",
-        "log_price_per_piece_normalized",
-        "log_estimation_discount_normalized",
-        "log_shelf_life_normalized",
-    ]
-    encoded[feature_columns] = scaler.fit_transform(encoded[feature_input_columns])
-
-    return encoded, feature_columns
-
-
-def find_nearest_historical_candidate(candidate_df: pd.DataFrame, new_code: str) -> str | None:
-    encoded_df, feature_columns = build_feature_matrix(candidate_df)
-    if encoded_df.empty or not feature_columns:
-        encoded_df, feature_columns = build_feature_matrix_for_fallback(candidate_df)
-
-    new_rows = encoded_df[encoded_df["item_code"] == new_code]
-    historical_rows = encoded_df[encoded_df["is_new_product"] == 0]
-    if new_rows.empty or historical_rows.empty:
-        encoded_df, feature_columns = build_feature_matrix_for_fallback(candidate_df)
-        if encoded_df.empty or not feature_columns:
-            return None
-        new_rows = encoded_df[encoded_df["item_code"] == new_code]
-        historical_rows = encoded_df[encoded_df["is_new_product"] == 0]
-
-    if encoded_df.empty or not feature_columns:
-        return None
-    if new_rows.empty or historical_rows.empty:
-        return None
-
-    distances = cdist(
-        new_rows[feature_columns].to_numpy(dtype=float),
-        historical_rows[feature_columns].to_numpy(dtype=float),
-        metric="euclidean",
-    ).flatten()
-    return historical_rows.iloc[int(np.argmin(distances))]["item_code"]
-
-
 def run_kmeans_pass(
     encoded_df: pd.DataFrame,
     feature_columns: list[str],
@@ -618,7 +540,6 @@ def classify_new_product(candidate_df: pd.DataFrame, new_code: str) -> dict:
             "corresponding_historical_product": None,
         }
 
-    fallback_hist_code = find_nearest_historical_candidate(candidate_df, new_code)
     nearest_hist_code = None
     current_df = candidate_df.copy()
 
@@ -627,10 +548,8 @@ def classify_new_product(candidate_df: pd.DataFrame, new_code: str) -> dict:
         if historical_candidates.empty:
             return {
                 "new_product_code": new_code,
-                "allocation_type": (
-                    "common_allocation" if fallback_hist_code is not None else "random_allocation"
-                ),
-                "corresponding_historical_product": fallback_hist_code,
+                "allocation_type": "random_allocation",
+                "corresponding_historical_product": None,
             }
 
         if len(current_df) <= MAX_CLUSTER_SIZE:
@@ -696,10 +615,6 @@ def classify_new_product(candidate_df: pd.DataFrame, new_code: str) -> dict:
     else:
         allocation_type = "random_allocation"
         corresponding_historical_product = None
-
-    if allocation_type == "random_allocation" and fallback_hist_code is not None:
-        allocation_type = "common_allocation"
-        corresponding_historical_product = fallback_hist_code
 
     return {
         "new_product_code": new_code,
