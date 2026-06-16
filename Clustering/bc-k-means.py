@@ -34,13 +34,9 @@ FIRST_EXAMPLE_CLUSTER_MEMBERSHIP_PATH = OUTPUT_DIR / "bc-k-means-first-example-f
 FIRST_EXAMPLE_CLUSTER_SUMMARY_PATH = OUTPUT_DIR / "bc-k-means-first-example-first-pass-cluster-summary.csv"
 FIRST_EXAMPLE_DENDROGRAM_DATASET_PATH = OUTPUT_DIR / "bc-k-means-first-example-cluster-dendrogram-dataset.csv"
 FIRST_EXAMPLE_DENDROGRAM_PATH = OUTPUT_DIR / "bc-k-means-first-example-cluster-dendrogram.png"
-FIRST_EXAMPLE_TRUNCATED_DENDROGRAM_PATH = (
-    OUTPUT_DIR / "bc-k-means-first-example-cluster-dendrogram-truncated.png"
-)
 DIAGNOSTIC_SAMPLE_NEW_SKU = "10002911001"
 
 MAX_CLUSTER_SIZE = 2
-DENDROGRAM_TRUNCATE_LAST_P = 50
 
 
 def load_product_metadata(product_path: Path) -> pd.DataFrame:
@@ -125,6 +121,84 @@ def build_feature_matrix(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     encoded[feature_columns] = scaler.fit_transform(encoded[feature_input_columns])
 
     return encoded, feature_columns
+
+
+def build_feature_matrix_for_fallback(candidate_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    encoded = candidate_df.copy()
+    raw_feature_columns = [
+        "Promo",
+        "capacity",
+        "price_per_piece",
+        "estimation_discount",
+        "shelf_life",
+    ]
+
+    for column in raw_feature_columns:
+        encoded[column] = pd.to_numeric(encoded[column], errors="coerce")
+
+    historical_mask = encoded["is_new_product"] == 0
+    for column in raw_feature_columns:
+        fill_value = encoded.loc[historical_mask, column].median()
+        if pd.isna(fill_value):
+            fill_value = encoded[column].median()
+        if pd.isna(fill_value):
+            return pd.DataFrame(), []
+        encoded[column] = encoded[column].fillna(fill_value)
+
+    encoded["shelf_life"] = np.ceil(encoded["shelf_life"])
+    encoded["log_capacity"] = np.log1p(encoded["capacity"].clip(lower=0))
+    encoded["log_price_per_piece"] = np.log1p(encoded["price_per_piece"].clip(lower=0))
+    encoded["log_estimation_discount"] = np.log1p(
+        encoded["estimation_discount"].clip(lower=0)
+    )
+    encoded["log_shelf_life"] = np.log1p(encoded["shelf_life"].clip(lower=0))
+
+    feature_input_columns = [
+        "Promo",
+        "log_capacity",
+        "log_price_per_piece",
+        "log_estimation_discount",
+        "log_shelf_life",
+    ]
+
+    scaler = StandardScaler()
+    feature_columns = [
+        "Promo_normalized",
+        "log_capacity_normalized",
+        "log_price_per_piece_normalized",
+        "log_estimation_discount_normalized",
+        "log_shelf_life_normalized",
+    ]
+    encoded[feature_columns] = scaler.fit_transform(encoded[feature_input_columns])
+
+    return encoded, feature_columns
+
+
+def find_nearest_historical_candidate(candidate_df: pd.DataFrame, new_code: str) -> str | None:
+    encoded_df, feature_columns = build_feature_matrix(candidate_df)
+    if encoded_df.empty or not feature_columns:
+        encoded_df, feature_columns = build_feature_matrix_for_fallback(candidate_df)
+
+    new_rows = encoded_df[encoded_df["item_code"] == new_code]
+    historical_rows = encoded_df[encoded_df["is_new_product"] == 0]
+    if new_rows.empty or historical_rows.empty:
+        encoded_df, feature_columns = build_feature_matrix_for_fallback(candidate_df)
+        if encoded_df.empty or not feature_columns:
+            return None
+        new_rows = encoded_df[encoded_df["item_code"] == new_code]
+        historical_rows = encoded_df[encoded_df["is_new_product"] == 0]
+
+    if encoded_df.empty or not feature_columns:
+        return None
+    if new_rows.empty or historical_rows.empty:
+        return None
+
+    distances = cdist(
+        new_rows[feature_columns].to_numpy(dtype=float),
+        historical_rows[feature_columns].to_numpy(dtype=float),
+        metric="euclidean",
+    ).flatten()
+    return historical_rows.iloc[int(np.argmin(distances))]["item_code"]
 
 
 def run_kmeans_pass(
@@ -321,43 +395,6 @@ def export_first_example_cluster_dendrogram(
     fig.tight_layout()
     fig.savefig(FIRST_EXAMPLE_DENDROGRAM_PATH, dpi=200, bbox_inches="tight")
     plt.close(fig)
-
-    truncated_last_p = min(DENDROGRAM_TRUNCATE_LAST_P, len(dendrogram_df))
-    truncated_fig, truncated_ax = plt.subplots(figsize=(16, 10))
-    dendrogram(
-        linkage_matrix,
-        labels=labels,
-        orientation="left",
-        truncate_mode="lastp",
-        p=truncated_last_p,
-        leaf_font_size=7,
-        show_contracted=True,
-        ax=truncated_ax,
-    )
-    truncated_ax.set_title(
-        f"Truncated dendrogram for diagnostic sample {new_code} "
-        f"(last {truncated_last_p} leaves)"
-    )
-    truncated_ax.set_xlabel("Ward linkage distance")
-    truncated_ax.set_ylabel("SKU group")
-
-    for tick in truncated_ax.get_ymajorticklabels():
-        label_text = tick.get_text()
-        if "[NEW]" in label_text:
-            tick.set_color("#b00020")
-            tick.set_fontweight("bold")
-        elif "[SAME_CLUSTER]" in label_text:
-            tick.set_color("#005f73")
-        else:
-            tick.set_color("#4a4a4a")
-
-    truncated_fig.tight_layout()
-    truncated_fig.savefig(
-        FIRST_EXAMPLE_TRUNCATED_DENDROGRAM_PATH,
-        dpi=200,
-        bbox_inches="tight",
-    )
-    plt.close(truncated_fig)
 
 
 def export_first_example_diagnostics(
@@ -581,6 +618,7 @@ def classify_new_product(candidate_df: pd.DataFrame, new_code: str) -> dict:
             "corresponding_historical_product": None,
         }
 
+    fallback_hist_code = find_nearest_historical_candidate(candidate_df, new_code)
     nearest_hist_code = None
     current_df = candidate_df.copy()
 
@@ -589,8 +627,10 @@ def classify_new_product(candidate_df: pd.DataFrame, new_code: str) -> dict:
         if historical_candidates.empty:
             return {
                 "new_product_code": new_code,
-                "allocation_type": "random_allocation",
-                "corresponding_historical_product": None,
+                "allocation_type": (
+                    "common_allocation" if fallback_hist_code is not None else "random_allocation"
+                ),
+                "corresponding_historical_product": fallback_hist_code,
             }
 
         if len(current_df) <= MAX_CLUSTER_SIZE:
@@ -656,6 +696,10 @@ def classify_new_product(candidate_df: pd.DataFrame, new_code: str) -> dict:
     else:
         allocation_type = "random_allocation"
         corresponding_historical_product = None
+
+    if allocation_type == "random_allocation" and fallback_hist_code is not None:
+        allocation_type = "common_allocation"
+        corresponding_historical_product = fallback_hist_code
 
     return {
         "new_product_code": new_code,
@@ -736,10 +780,6 @@ def main():
         print(f"First example cluster summary saved to: {FIRST_EXAMPLE_CLUSTER_SUMMARY_PATH}")
         print(f"First example cluster dendrogram dataset saved to: {FIRST_EXAMPLE_DENDROGRAM_DATASET_PATH}")
         print(f"First example cluster dendrogram saved to: {FIRST_EXAMPLE_DENDROGRAM_PATH}")
-        print(
-            "First example truncated cluster dendrogram saved to: "
-            f"{FIRST_EXAMPLE_TRUNCATED_DENDROGRAM_PATH}"
-        )
     print(f"Allocation summary saved to: {ALLOCATION_SUMMARY_PATH}")
     print(f"Allocation summary chart saved to: {ALLOCATION_CHART_PATH}")
     print(f"Common-allocation new SKUs: {common_count:,}")
