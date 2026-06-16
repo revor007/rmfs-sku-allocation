@@ -1,4 +1,5 @@
 import os
+import shutil
 import numpy as np
 import pandas as pd
 
@@ -11,6 +12,8 @@ ACTUAL_ORDER_ID_CANDIDATES = ["\u8ba2\u5355\u53f7", "order_id"]
 ACTUAL_SKU_CANDIDATES = ["\u5546\u54c1\u7f16\u7801", "item_code"]
 ACTUAL_QUANTITY_CANDIDATES = ["\u5546\u54c1\u6570\u91cf", "item_quantity", "quantity"]
 ACTUAL_CREATED_TIME_CANDIDATES = ["\u521b\u5efa\u65f6\u95f4", "order_date", "created_at"]
+ORDER_MODE_ENV = "FULL_POSTT_ORDER_MODE"
+BOOTSTRAP_SHARED_ORDER_PATH_ENV = "FULL_POSTT_SHARED_BOOTSTRAP_ORDER_PATH"
 
 
 def normalize_item_code(value):
@@ -67,12 +70,41 @@ def find_actual_order_data_path():
     return candidates[0]
 
 
+def write_assign_order_from_generated(generated_order, assign_order_path):
+    assign_order_df = generated_order.copy()
+    assign_order_df["assigned_station"] = None
+    assign_order_df["assigned_pod"] = None
+    assign_order_df["status"] = -3
+    assign_order_df.to_csv(assign_order_path, index=False)
+
+
+def load_shared_bootstrap_orders():
+    generated_order_path = os.path.join(PARENT_DIRECTORY, "data/output/generated_order.csv")
+    assign_order_path = os.path.join(PARENT_DIRECTORY, "data/input/assign_order.csv")
+    shared_order_path = os.getenv(BOOTSTRAP_SHARED_ORDER_PATH_ENV)
+
+    if not shared_order_path:
+        raise ValueError(
+            "bootstrap_actual mode requires FULL_POSTT_SHARED_BOOTSTRAP_ORDER_PATH to be set."
+        )
+    if not os.path.exists(shared_order_path):
+        raise FileNotFoundError(
+            f"Shared bootstrap order file was not found: {shared_order_path}"
+        )
+
+    shutil.copy2(shared_order_path, generated_order_path)
+    generated_order = pd.read_csv(generated_order_path)
+    write_assign_order_from_generated(generated_order, assign_order_path)
+    return generated_order
+
+
 def generate_orders_from_actual_data():
     items_path = os.path.join(PARENT_DIRECTORY, "data/output/items.csv")
     generated_order_path = os.path.join(PARENT_DIRECTORY, "data/output/generated_order.csv")
     assign_order_path = os.path.join(PARENT_DIRECTORY, "data/input/assign_order.csv")
 
-    items = pd.read_csv(items_path)
+    items = pd.read_csv(items_path, sep=None, engine="python", encoding="utf-8-sig")
+    items.columns = [normalize_column_name(col) for col in items.columns]
     actual_order_path = find_actual_order_data_path()
     raw_orders = pd.read_csv(
         actual_order_path,
@@ -105,7 +137,11 @@ def generate_orders_from_actual_data():
         )
 
     item_lookup = items[["item_id", "item_code"]].copy()
+    item_lookup["item_id"] = pd.to_numeric(item_lookup["item_id"], errors="coerce")
+    item_lookup = item_lookup.dropna(subset=["item_id"]).copy()
+    item_lookup["item_id"] = item_lookup["item_id"].astype(np.int32)
     item_lookup["item_code"] = item_lookup["item_code"].map(normalize_item_code)
+    item_lookup = item_lookup[item_lookup["item_code"] != ""].copy()
     raw_orders = raw_orders.merge(item_lookup, left_on=sku_col, right_on="item_code", how="left")
 
     missing_mask = raw_orders["item_id"].isna()
@@ -146,12 +182,7 @@ def generate_orders_from_actual_data():
     ].copy()
     generated_order.insert(0, "sequence_id", np.arange(len(generated_order), dtype=np.int64))
     generated_order.to_csv(generated_order_path, index=False)
-
-    assign_order_df = generated_order.copy()
-    assign_order_df["assigned_station"] = None
-    assign_order_df["assigned_pod"] = None
-    assign_order_df["status"] = -3
-    assign_order_df.to_csv(assign_order_path, index=False)
+    write_assign_order_from_generated(generated_order, assign_order_path)
 
     return generated_order
 
@@ -485,8 +516,18 @@ def config_orders(
 ):
     print(f"Config orders: sim_ver={sim_ver}, total_SKUs={total_requested_item:,}, initial_order={initial_order}")
     if use_actual_order_data:
-        print("Generate orders from actual 21-day order data...")
-        generated_order = generate_orders_from_actual_data()
+        order_mode = os.getenv(ORDER_MODE_ENV, "fixed_actual").strip().lower()
+        if order_mode == "bootstrap_actual":
+            print("Generate orders from shared bootstrap actual-order stream...")
+            generated_order = load_shared_bootstrap_orders()
+        elif order_mode == "fixed_actual":
+            print("Generate orders from actual 21-day order data...")
+            generated_order = generate_orders_from_actual_data()
+        else:
+            raise ValueError(
+                f"Unsupported FULL_POSTT_ORDER_MODE '{order_mode}'. "
+                "Expected 'fixed_actual' or 'bootstrap_actual'."
+            )
         print(f"    Actual order rows generated: {len(generated_order):,}")
         print(f"    Actual orders generated: {generated_order['order_id'].nunique():,}")
         return generated_order

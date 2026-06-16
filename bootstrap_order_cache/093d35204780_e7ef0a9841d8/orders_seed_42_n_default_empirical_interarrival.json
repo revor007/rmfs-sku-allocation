@@ -1,0 +1,16 @@
+{
+  "generator": "shared_bootstrap_actual",
+  "seed": 42,
+  "n_orders": 14992,
+  "arrival_mode": "empirical_interarrival",
+  "source_path": "D:\\ITB\\Tugas Akhir\\_full_postt_parallel_runs\\four_scenario_1000_shared_latest\\my_scenario\\netlogo-rmfs\\data\\input\\cutoff_test_orders.csv",
+  "items_path": "D:\\ITB\\Tugas Akhir\\_full_postt_parallel_runs\\four_scenario_1000_shared_latest\\my_scenario\\netlogo-rmfs\\data\\output\\items.csv",
+  "source_hash": "093d35204780",
+  "mapping_hash": "e7ef0a9841d8",
+  "source_unique_orders": 14992,
+  "sampled_unique_source_orders": 9499,
+  "generated_unique_orders": 14992,
+  "generated_order_lines": 39768,
+  "generated_max_arrival": 344760,
+  "output_path": "D:\\ITB\\Tugas Akhir\\_full_postt_parallel_runs\\bootstrap_order_cache\\093d35204780_e7ef0a9841d8\\orders_seed_42_n_default_empirical_interarrival.csv"
+}
