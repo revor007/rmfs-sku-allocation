@@ -29,6 +29,10 @@ BOOTSTRAP_BASE_SEED_ENV = "FULL_POSTT_BOOTSTRAP_BASE_SEED"
 BOOTSTRAP_ARRIVAL_MODE_ENV = "FULL_POSTT_BOOTSTRAP_ARRIVAL_MODE"
 BOOTSTRAP_N_ORDERS_ENV = "FULL_POSTT_BOOTSTRAP_N_ORDERS"
 BOOTSTRAP_SHARED_ORDER_PATH_ENV = "FULL_POSTT_SHARED_BOOTSTRAP_ORDER_PATH"
+POD_LOCATION_MODE_ENV = "FULL_POSTT_POD_LOCATION_MODE"
+POD_LOCATION_BASE_SEED_ENV = "FULL_POSTT_POD_LOCATION_BASE_SEED"
+RUNTIME_POD_LOCATION_POLICY_ENV = "RMFS_RUNTIME_POD_LOCATION_POLICY"
+RUNTIME_POD_LOCATION_SEED_ENV = "RMFS_RUNTIME_POD_LOCATION_SEED"
 
 
 def ensure_runtime_input_files(run_root: Path) -> None:
@@ -101,11 +105,15 @@ bootstrap_n_orders = (
     if bootstrap_n_orders_raw is not None and bootstrap_n_orders_raw.strip() != ""
     else None
 )
+pod_location_mode = os.environ.get(POD_LOCATION_MODE_ENV, "identity").strip().lower()
+pod_location_base_seed = int(os.environ.get(POD_LOCATION_BASE_SEED_ENV, "42"))
 
 if run_count <= 0:
     raise SystemExit("run_count must be a positive integer.")
 if order_mode not in {"fixed_actual", "bootstrap_actual"}:
     raise SystemExit("FULL_POSTT_ORDER_MODE must be either 'fixed_actual' or 'bootstrap_actual'.")
+if pod_location_mode not in {"identity", "shuffle"}:
+    raise SystemExit("FULL_POSTT_POD_LOCATION_MODE must be either 'identity' or 'shuffle'.")
 
 ensure_runtime_input_files(run_dir)
 output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -134,6 +142,18 @@ def prepare_order_stream(replication_index: int) -> tuple[str, int | None, Path 
     return order_mode, current_seed, shared_order_path
 
 
+def prepare_pod_location_stream(replication_index: int) -> tuple[str, int | None]:
+    if pod_location_mode != "shuffle":
+        os.environ.pop(RUNTIME_POD_LOCATION_POLICY_ENV, None)
+        os.environ.pop(RUNTIME_POD_LOCATION_SEED_ENV, None)
+        return pod_location_mode, None
+
+    current_seed = pod_location_base_seed + (replication_index - 1)
+    os.environ[RUNTIME_POD_LOCATION_POLICY_ENV] = "shuffle"
+    os.environ[RUNTIME_POD_LOCATION_SEED_ENV] = str(current_seed)
+    return pod_location_mode, current_seed
+
+
 def load_simulation_module():
     last_error = None
     for attempt in range(3):
@@ -155,6 +175,9 @@ def load_simulation_module():
 
 def run_single_replication(replication_index: int) -> pd.DataFrame:
     active_order_mode, active_seed, shared_order_path = prepare_order_stream(replication_index)
+    active_pod_location_mode, active_pod_location_seed = prepare_pod_location_stream(
+        replication_index
+    )
     sim = load_simulation_module()
     warehouse = sim.warehouse
     start = time.time()
@@ -168,6 +191,8 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
         f"run={replication_index}/{run_count} "
         f"order_mode={active_order_mode} "
         f"seed={active_seed if active_seed is not None else 'n/a'} "
+        f"pod_location_mode={active_pod_location_mode} "
+        f"pod_location_seed={active_pod_location_seed if active_pod_location_seed is not None else 'n/a'} "
         f"horizon_tick={horizon_tick:g} "
         f"run_dir={run_dir}",
         flush=True,
@@ -231,6 +256,8 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
                 "replications_total": run_count,
                 "order_mode": active_order_mode,
                 "bootstrap_seed": active_seed,
+                "pod_location_mode": active_pod_location_mode,
+                "pod_location_seed": active_pod_location_seed,
                 "ticks_elapsed": float(warehouse._tick),
                 "steps_elapsed": int(warehouse._step),
                 "stopped_cleanly_before_horizon": int(stopped_cleanly),
@@ -305,12 +332,44 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
             }
         ]
     )
+    if hasattr(warehouse, "getReplenishmentDebugSummary"):
+        debug_summary = warehouse.getReplenishmentDebugSummary()
+        if debug_summary:
+            for key, value in debug_summary.items():
+                result.loc[0, key] = value
+            print(
+                "[REPL_DEBUG] "
+                f"scenario={label} "
+                f"run={replication_index}/{run_count} "
+                f"watchlist_refreshes={debug_summary.get('repldbg_watchlist_refreshes', 0)} "
+                f"critical_peak={debug_summary.get('repldbg_critical_sku_peak', 0)} "
+                f"enqueue_attempts={debug_summary.get('repldbg_enqueue_attempts', 0)} "
+                f"pending_exists={debug_summary.get('repldbg_pending_request_exists_count', 0)} "
+                f"no_eligible={debug_summary.get('repldbg_no_eligible_pod_count', 0)} "
+                f"qj_gate={debug_summary.get('repldbg_qj_gate_block_count', 0)} "
+                f"blocked_no_station={debug_summary.get('repldbg_dispatch_blocked_no_station', 0)} "
+                f"blocked_no_robot={debug_summary.get('repldbg_dispatch_blocked_no_robot', 0)} "
+                f"blocked_pod_not_idle={debug_summary.get('repldbg_dispatch_blocked_pod_not_idle', 0)} "
+                f"max_pending_age={debug_summary.get('repldbg_max_pending_request_age', 0)}",
+                flush=True,
+            )
+            print(
+                "[REPL_DEBUG_TOP] "
+                f"scenario={label} "
+                f"run={replication_index}/{run_count} "
+                f"top_no_eligible_skus={debug_summary.get('repldbg_top_no_eligible_skus', '')} "
+                f"top_qj_gate_pods={debug_summary.get('repldbg_top_qj_gate_pods', '')} "
+                f"top_busy_pods={debug_summary.get('repldbg_top_pod_not_idle_pods', '')}",
+                flush=True,
+            )
     print(
         "[DONE] "
         f"scenario={label} "
         f"run={replication_index}/{run_count} "
         f"order_mode={active_order_mode} "
         f"seed={active_seed if active_seed is not None else 'n/a'} "
+        f"pod_location_mode={active_pod_location_mode} "
+        f"pod_location_seed={active_pod_location_seed if active_pod_location_seed is not None else 'n/a'} "
         f"tick={float(warehouse._tick):.2f} "
         f"step={int(warehouse._step)} "
         f"elapsed_s={elapsed:.1f} "

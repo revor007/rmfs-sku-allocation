@@ -4,6 +4,7 @@ from world.entities.pod import Pod
 from lib.types.netlogo_coordinate import NetLogoCoordinate
 import numpy as np
 import pandas as pd
+import random
 from sklearn.metrics.pairwise import manhattan_distances
 from lib.constant import PARENT_DIRECTORY
 import os
@@ -631,23 +632,39 @@ class PodManager:
     
     def loadPodsFromCSV(self): # NEW FUNCTION TO CONNECT THE PODS.CSV WITH THE COORDINATE
         # Step 1: Build pod_id -> (x, y) mapping from generated_pod.csv, where value 1 marks a pod location
-        pod_id_to_coord = {}
+        pod_coordinates = []
         generated_pod_path = os.path.join(PARENT_DIRECTORY, 'data/output/generated_pod.csv')
         if os.path.exists(generated_pod_path):
             pod_grid = pd.read_csv(generated_pod_path, header=None).values
-            pod_id_counter = 0
             for y, row in enumerate(pod_grid):
                 for x, val in enumerate(row):
                     try:
                         if int(val) == 1:
-                            pod_id_to_coord[pod_id_counter] = (x, y)
-                            pod_id_counter += 1
+                            pod_coordinates.append((x, y))
                     except Exception:
                         continue
         else:
             # Fallback: use in-memory pods if already created
             for pod in self.pods:
-                pod_id_to_coord[pod.pod_number] = (pod.pos_x, pod.pos_y)
+                pod_coordinates.append((pod.pos_x, pod.pos_y))
+
+        location_policy = os.getenv("RMFS_RUNTIME_POD_LOCATION_POLICY", "identity").strip().lower()
+        location_seed_raw = os.getenv("RMFS_RUNTIME_POD_LOCATION_SEED", "42").strip()
+        if location_policy == "shuffle" and len(pod_coordinates) > 1:
+            try:
+                location_seed = int(location_seed_raw)
+            except ValueError:
+                location_seed = 42
+            rng = random.Random(location_seed)
+            rng.shuffle(pod_coordinates)
+            print(
+                f"PodManager: shuffled pod locations at runtime "
+                f"(seed={location_seed}, pod_slots={len(pod_coordinates)})"
+            )
+
+        pod_id_to_coord = {
+            pod_id: coord for pod_id, coord in enumerate(pod_coordinates)
+        }
 
         # Step 2: Load pods.csv and assign SKUs/slots to pods
         pods_csv_path = os.path.join(PARENT_DIRECTORY, 'data/output/pods.csv')
