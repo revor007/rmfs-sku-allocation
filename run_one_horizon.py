@@ -428,6 +428,7 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
                 f"pending_exists={debug_summary.get('repldbg_pending_request_exists_count', 0)} "
                 f"no_eligible={debug_summary.get('repldbg_no_eligible_pod_count', 0)} "
                 f"qj_gate={debug_summary.get('repldbg_qj_gate_block_count', 0)} "
+                f"qj_bypass={debug_summary.get('repldbg_qj_bypass_count', 0)} "
                 f"blocked_no_station={debug_summary.get('repldbg_dispatch_blocked_no_station', 0)} "
                 f"blocked_no_robot={debug_summary.get('repldbg_dispatch_blocked_no_robot', 0)} "
                 f"blocked_pod_not_idle={debug_summary.get('repldbg_dispatch_blocked_pod_not_idle', 0)} "
@@ -440,6 +441,7 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
                 f"run={replication_index}/{run_count} "
                 f"top_no_eligible_skus={debug_summary.get('repldbg_top_no_eligible_skus', '')} "
                 f"top_qj_gate_pods={debug_summary.get('repldbg_top_qj_gate_pods', '')} "
+                f"top_qj_bypass_pods={debug_summary.get('repldbg_top_qj_bypass_pods', '')} "
                 f"top_busy_pods={debug_summary.get('repldbg_top_pod_not_idle_pods', '')}",
                 flush=True,
             )

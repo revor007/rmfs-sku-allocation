@@ -112,6 +112,10 @@ class Warehouse:
         self.global_watchlist_interval = int(os.getenv("RMFS_GLOBAL_WATCHLIST_TICKS", "300"))
         self.global_watchlist_threshold = float(os.getenv("RMFS_GLOBAL_WATCHLIST_THRESHOLD", "0.9"))
         self.pod_replenishment_threshold = float(os.getenv("RMFS_POD_REPLENISHMENT_THRESHOLD", "0.4"))
+        self.replenishment_allow_urgent_qj_bypass = os.getenv(
+            "RMFS_REPL_BYPASS_QJ_FOR_URGENT",
+            "1",
+        ).strip().lower() in {"1", "true", "yes", "y", "on"}
         self.last_watchlist_refresh_tick = -1
         self.last_hold_recheck_tick = -1
         
@@ -166,6 +170,7 @@ class Warehouse:
             "pending_request_exists_count": 0,
             "no_eligible_pod_count": 0,
             "qj_gate_block_count": 0,
+            "qj_bypass_count": 0,
             "dispatch_blocked_no_station": 0,
             "dispatch_blocked_no_robot": 0,
             "dispatch_blocked_pod_not_idle": 0,
@@ -178,6 +183,7 @@ class Warehouse:
             "top_no_eligible_skus": Counter(),
             "top_pending_request_skus": Counter(),
             "top_qj_gate_pods": Counter(),
+            "top_qj_bypass_pods": Counter(),
             "top_pod_not_idle_pods": Counter(),
             "top_no_robot_pods": Counter(),
             "top_no_station_pods": Counter(),
@@ -369,6 +375,9 @@ class Warehouse:
             "repldbg_qj_gate_block_count": int(
                 self.replenishment_debug["qj_gate_block_count"]
             ),
+            "repldbg_qj_bypass_count": int(
+                self.replenishment_debug["qj_bypass_count"]
+            ),
             "repldbg_dispatch_blocked_no_station": int(
                 self.replenishment_debug["dispatch_blocked_no_station"]
             ),
@@ -402,6 +411,9 @@ class Warehouse:
             ),
             "repldbg_top_qj_gate_pods": self._format_replenishment_debug_counter(
                 "top_qj_gate_pods"
+            ),
+            "repldbg_top_qj_bypass_pods": self._format_replenishment_debug_counter(
+                "top_qj_bypass_pods"
             ),
             "repldbg_top_pod_not_idle_pods": self._format_replenishment_debug_counter(
                 "top_pod_not_idle_pods"
@@ -1592,7 +1604,10 @@ class Warehouse:
                 self._mark_replenishment_request_blocked(request, "pod_not_idle")
                 continue
 
-            skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
+            skus_to_replenish, _ = self.get_replenishment_skus_for_pod(
+                pod,
+                request=request,
+            )
             if not skus_to_replenish:
                 self._record_replenishment_debug_count("dispatch_removed_no_longer_needed")
                 self.removePendingReplenishmentDispatch(pod.pod_number)
@@ -2536,10 +2551,15 @@ class Warehouse:
 
         return float(sum(fill_ratios) / len(fill_ratios))
 
-    def get_replenishment_skus_for_pod(self, pod: Pod) -> tuple[list, float]:
+    def get_replenishment_skus_for_pod(
+        self,
+        pod: Pod,
+        request: Optional[Dict] = None,
+    ) -> tuple[list, float]:
         """
         Returns the below-reorder SKUs that make this pod eligible for
         replenishment, using Qj_critical as the binary pod-level gate.
+        Urgent or escalated requests may bypass the Qj gate.
         """
         if pod is None or not pod.skus:
             return [], 1.0
@@ -2547,7 +2567,12 @@ class Warehouse:
         critical_skus = self.get_below_reorder_skus_for_pod(pod)
         qj_score = self.get_pod_critical_fill_score(pod, critical_skus)
         if qj_score >= self.pod_replenishment_threshold:
-            return [], qj_score
+            if not self.shouldBypassReplenishmentQj(
+                critical_skus,
+                request=request,
+            ):
+                return [], qj_score
+            self._record_replenishment_qj_bypass(pod)
 
         return critical_skus, qj_score
 
@@ -2595,6 +2620,40 @@ class Warehouse:
             return 1
         return 0
 
+    def shouldBypassReplenishmentQj(
+        self,
+        skus_to_check=None,
+        request: Optional[Dict] = None,
+        current_tick: Optional[int] = None,
+    ) -> bool:
+        if not self.replenishment_allow_urgent_qj_bypass:
+            return False
+
+        if request is not None:
+            if bool(request.get("escalated_on_blocking", False)):
+                return True
+            if bool(request.get("guaranteed_on_release", False)):
+                return True
+            if int(request.get("urgency_level", 0)) > 0:
+                return True
+            if self.shouldGuaranteeReplenishmentRequest(request, current_tick):
+                return True
+
+        if not skus_to_check:
+            return False
+
+        return self.getReplenishmentUrgencyLevel(skus_to_check) > 0
+
+    def _record_replenishment_qj_bypass(self, pod: Optional[Pod]):
+        if pod is None:
+            return
+
+        self._record_replenishment_debug_count("qj_bypass_count")
+        self._record_replenishment_debug_top(
+            "top_qj_bypass_pods",
+            int(pod.pod_number),
+        )
+
     def shouldGuaranteeReplenishmentRequest(
         self,
         request: Optional[Dict],
@@ -2626,12 +2685,14 @@ class Warehouse:
                 continue
             qj_score = self.get_pod_critical_fill_score(pod, critical_skus)
             if qj_score >= self.pod_replenishment_threshold:
-                self._record_replenishment_debug_count("qj_gate_block_count")
-                self._record_replenishment_debug_top(
-                    "top_qj_gate_pods",
-                    int(pod.pod_number),
-                )
-                continue
+                if not self.shouldBypassReplenishmentQj(critical_skus):
+                    self._record_replenishment_debug_count("qj_gate_block_count")
+                    self._record_replenishment_debug_top(
+                        "top_qj_gate_pods",
+                        int(pod.pod_number),
+                    )
+                    continue
+                self._record_replenishment_qj_bypass(pod)
             skus_to_replenish = critical_skus
 
             sku_details = pod.skus.get(sku_id, {})
@@ -2720,7 +2781,10 @@ class Warehouse:
         if not self.shouldGuaranteeReplenishmentRequest(request, int(self._tick)):
             return False
 
-        skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
+        skus_to_replenish, _ = self.get_replenishment_skus_for_pod(
+            pod,
+            request=request,
+        )
         if not skus_to_replenish:
             self._record_replenishment_debug_count("dispatch_removed_no_longer_needed")
             self.removePendingReplenishmentDispatch(pod.pod_number)
