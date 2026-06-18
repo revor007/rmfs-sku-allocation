@@ -122,6 +122,12 @@ class Warehouse:
         self.replenishment_dispatch_aging_ticks = int(
             os.getenv("RMFS_REPLENISHMENT_AGING_TICKS", "300")
         )
+        self.replenishment_block_escalation_count = int(
+            os.getenv("RMFS_REPL_BLOCK_ESCALATION_COUNT", "3")
+        )
+        self.replenishment_block_escalation_ticks = int(
+            os.getenv("RMFS_REPL_BLOCK_ESCALATION_TICKS", "60")
+        )
         self.health_check_interval = int(os.getenv("RMFS_HEALTH_CHECK_INTERVAL", "0"))
         self.health_stall_ticks = int(os.getenv("RMFS_HEALTH_STALL_TICKS", "600"))
         self.persist_assign_order_csv = os.getenv(
@@ -166,6 +172,7 @@ class Warehouse:
             "dispatch_removed_no_longer_needed": 0,
             "dispatched_count": 0,
             "send_success_count": 0,
+            "block_escalation_count": 0,
             "max_pending_request_age": 0,
             "max_pending_request_pod": None,
             "top_no_eligible_skus": Counter(),
@@ -174,6 +181,7 @@ class Warehouse:
             "top_pod_not_idle_pods": Counter(),
             "top_no_robot_pods": Counter(),
             "top_no_station_pods": Counter(),
+            "top_block_escalated_pods": Counter(),
         }
     
     def _increase_nested_quantity(self, store: Dict, order_id, sku, qty):
@@ -269,6 +277,80 @@ class Warehouse:
             return ""
         return ",".join(f"{item}:{count}" for item, count in counter.most_common(limit))
 
+    def _maybe_escalate_blocked_replenishment_request(
+        self,
+        request: Optional[Dict],
+        current_tick: Optional[int] = None,
+        pod: Optional[Pod] = None,
+    ) -> bool:
+        if request is None:
+            return False
+
+        if current_tick is None:
+            current_tick = int(self._tick)
+
+        if bool(request.get("escalated_on_blocking", False)):
+            return True
+
+        blocked_total = int(request.get("blocked_total_count", 0))
+        created_tick = int(request.get("created_tick", current_tick))
+        wait_age = max(0, current_tick - created_tick)
+
+        hit_block_threshold = (
+            self.replenishment_block_escalation_count > 0
+            and blocked_total >= self.replenishment_block_escalation_count
+        )
+        hit_age_threshold = (
+            self.replenishment_block_escalation_ticks > 0
+            and wait_age >= self.replenishment_block_escalation_ticks
+        )
+
+        if not (hit_block_threshold or hit_age_threshold):
+            return False
+
+        request["guaranteed_on_release"] = True
+        request["escalated_on_blocking"] = True
+        self._record_replenishment_debug_count("block_escalation_count")
+
+        pod_number = int(request.get("pod_number", -1))
+        self._record_replenishment_debug_top("top_block_escalated_pods", pod_number)
+
+        if pod is None:
+            try:
+                pod = self.pod_manager.getPodByNumber(pod_number)
+            except (IndexError, TypeError):
+                pod = None
+
+        if pod is not None and not pod.is_awaiting_replenishment:
+            pod.must_replenish_before_pick = True
+
+        return True
+
+    def _mark_replenishment_request_blocked(self, request: Optional[Dict], reason: str):
+        if request is None:
+            return False
+
+        current_tick = int(self._tick)
+        if request.get("first_blocked_tick") is None:
+            request["first_blocked_tick"] = current_tick
+
+        request["last_blocked_tick"] = current_tick
+        request["blocked_total_count"] = int(request.get("blocked_total_count", 0)) + 1
+
+        if reason == "no_robot":
+            request["blocked_no_robot_count"] = int(
+                request.get("blocked_no_robot_count", 0)
+            ) + 1
+        elif reason == "pod_not_idle":
+            request["blocked_pod_not_idle_count"] = int(
+                request.get("blocked_pod_not_idle_count", 0)
+            ) + 1
+
+        return self._maybe_escalate_blocked_replenishment_request(
+            request,
+            current_tick=current_tick,
+        )
+
     def getReplenishmentDebugSummary(self) -> Dict[str, object]:
         if not self.replenishment_debug_enabled:
             return {}
@@ -301,6 +383,9 @@ class Warehouse:
             ),
             "repldbg_dispatched_count": int(self.replenishment_debug["dispatched_count"]),
             "repldbg_send_success_count": int(self.replenishment_debug["send_success_count"]),
+            "repldbg_block_escalation_count": int(
+                self.replenishment_debug["block_escalation_count"]
+            ),
             "repldbg_max_pending_request_age": int(
                 self.replenishment_debug["max_pending_request_age"]
             ),
@@ -326,6 +411,9 @@ class Warehouse:
             ),
             "repldbg_top_no_station_pods": self._format_replenishment_debug_counter(
                 "top_no_station_pods"
+            ),
+            "repldbg_top_block_escalated_pods": self._format_replenishment_debug_counter(
+                "top_block_escalated_pods"
             ),
         }
 
@@ -1411,6 +1499,12 @@ class Warehouse:
                 "created_tick": int(self._tick),
                 "urgency_level": int(urgency_level),
                 "guaranteed_on_release": bool(urgency_level > 0),
+                "blocked_total_count": 0,
+                "blocked_no_robot_count": 0,
+                "blocked_pod_not_idle_count": 0,
+                "first_blocked_tick": None,
+                "last_blocked_tick": None,
+                "escalated_on_blocking": False,
             }
         )
         pod.has_pending_replenishment_dispatch = True
@@ -1454,6 +1548,10 @@ class Warehouse:
         )
 
         for request in pending_requests:
+            self._maybe_escalate_blocked_replenishment_request(
+                request,
+                current_tick=current_tick,
+            )
             if (
                 prioritize_aged_only
                 and not self.shouldGuaranteeReplenishmentRequest(request, current_tick)
@@ -1491,6 +1589,7 @@ class Warehouse:
                     "top_pod_not_idle_pods",
                     int(request.get("pod_number", -1)),
                 )
+                self._mark_replenishment_request_blocked(request, "pod_not_idle")
                 continue
 
             skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
@@ -1506,6 +1605,7 @@ class Warehouse:
                     "top_no_robot_pods",
                     int(request.get("pod_number", -1)),
                 )
+                self._mark_replenishment_request_blocked(request, "no_robot")
                 break
 
             success = self.sendPodForReplenishment(
@@ -2594,6 +2694,10 @@ class Warehouse:
             pod.must_replenish_before_pick = False
 
         for request in self.pending_replenishment_dispatches:
+            self._maybe_escalate_blocked_replenishment_request(
+                request,
+                current_tick=current_tick,
+            )
             if not self.shouldGuaranteeReplenishmentRequest(request, current_tick):
                 continue
 

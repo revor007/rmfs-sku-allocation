@@ -23,6 +23,7 @@ PROGRESS_ENABLED = os.environ.get("FULL_POSTT_ENABLE_PROGRESS", "1").strip().low
 }
 PROGRESS_TICKS = max(1.0, float(os.environ.get("FULL_POSTT_PROGRESS_TICKS", "100")))
 PROGRESS_SECONDS = max(1.0, float(os.environ.get("FULL_POSTT_PROGRESS_SECONDS", "30")))
+CHECKPOINT_TICKS_ENV = "FULL_POSTT_CHECKPOINT_TICKS"
 RUN_COUNT_ENV = "FULL_POSTT_RUN_COUNT"
 ORDER_MODE_ENV = "FULL_POSTT_ORDER_MODE"
 BOOTSTRAP_BASE_SEED_ENV = "FULL_POSTT_BOOTSTRAP_BASE_SEED"
@@ -107,6 +108,7 @@ bootstrap_n_orders = (
 )
 pod_location_mode = os.environ.get(POD_LOCATION_MODE_ENV, "identity").strip().lower()
 pod_location_base_seed = int(os.environ.get(POD_LOCATION_BASE_SEED_ENV, "42"))
+checkpoint_ticks = max(0.0, float(os.environ.get(CHECKPOINT_TICKS_ENV, "20000")))
 
 if run_count <= 0:
     raise SystemExit("run_count must be a positive integer.")
@@ -123,6 +125,18 @@ if str(run_dir) not in sys.path:
     sys.path.insert(0, str(run_dir))
 
 devnull = open(os.devnull, "w")
+
+
+def append_result_frame(frame: pd.DataFrame) -> None:
+    write_header = not output_csv.exists() or output_csv.stat().st_size == 0
+    frame.to_csv(
+        output_csv,
+        index=False,
+        sep=CSV_SEPARATOR,
+        encoding=CSV_ENCODING if write_header else "utf-8",
+        mode="a",
+        header=write_header,
+    )
 
 
 def prepare_order_stream(replication_index: int) -> tuple[str, int | None, Path | None]:
@@ -173,65 +187,25 @@ def load_simulation_module():
     raise last_error
 
 
-def run_single_replication(replication_index: int) -> pd.DataFrame:
-    active_order_mode, active_seed, shared_order_path = prepare_order_stream(replication_index)
-    active_pod_location_mode, active_pod_location_seed = prepare_pod_location_stream(
-        replication_index
-    )
-    sim = load_simulation_module()
-    warehouse = sim.warehouse
-    start = time.time()
-    stopped_cleanly = False
-    last_progress_tick = float(warehouse._tick)
-    last_progress_time = start
-
-    print(
-        "[START] "
-        f"scenario={label} "
-        f"run={replication_index}/{run_count} "
-        f"order_mode={active_order_mode} "
-        f"seed={active_seed if active_seed is not None else 'n/a'} "
-        f"pod_location_mode={active_pod_location_mode} "
-        f"pod_location_seed={active_pod_location_seed if active_pod_location_seed is not None else 'n/a'} "
-        f"horizon_tick={horizon_tick:g} "
-        f"run_dir={run_dir}",
-        flush=True,
-    )
-    if shared_order_path is not None:
-        print(
-            f"[ORDER] scenario={label} run={replication_index}/{run_count} shared_order={shared_order_path}",
-            flush=True,
-        )
-    while float(warehouse._tick) < horizon_tick:
-        warehouse.tick()
-        current_tick = float(warehouse._tick)
-        now = time.time()
-        if PROGRESS_ENABLED and (
-            (current_tick - last_progress_tick) >= PROGRESS_TICKS
-            or (now - last_progress_time) >= PROGRESS_SECONDS
-        ):
-            elapsed_now = now - start
-            print(
-                "[PROGRESS] "
-                f"scenario={label} "
-                f"run={replication_index}/{run_count} "
-                f"order_mode={active_order_mode} "
-                f"tick={current_tick:.2f}/{horizon_tick:.2f} "
-                f"step={int(warehouse._step)} "
-                f"elapsed_s={elapsed_now:.1f}",
-                flush=True,
-            )
-            last_progress_tick = current_tick
-            last_progress_time = now
-        if warehouse.isSimulationComplete():
-            stopped_cleanly = True
-            break
-    elapsed = time.time() - start
+def build_result_frame(
+    *,
+    warehouse,
+    replication_index: int,
+    active_order_mode: str,
+    active_seed: int | None,
+    active_pod_location_mode: str,
+    active_pod_location_seed: int | None,
+    elapsed: float,
+    stopped_cleanly: bool,
+    snapshot_kind: str,
+    snapshot_target_tick: float | None,
+) -> pd.DataFrame:
     if (
         hasattr(warehouse, "refreshSimulationHealth")
         and int(getattr(warehouse, "health_check_interval", 0)) > 0
     ):
-        warehouse.refreshSimulationHealth(force_log=True)
+        warehouse.refreshSimulationHealth(force_log=(snapshot_kind == "final"))
+
     on_hold = int(
         sum(
             1
@@ -254,6 +228,8 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
                 "scenario": label,
                 "replication": replication_index,
                 "replications_total": run_count,
+                "snapshot_kind": snapshot_kind,
+                "snapshot_target_tick": snapshot_target_tick,
                 "order_mode": active_order_mode,
                 "bootstrap_seed": active_seed,
                 "pod_location_mode": active_pod_location_mode,
@@ -337,6 +313,111 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
         if debug_summary:
             for key, value in debug_summary.items():
                 result.loc[0, key] = value
+    return result
+
+
+def run_single_replication(replication_index: int) -> pd.DataFrame:
+    active_order_mode, active_seed, shared_order_path = prepare_order_stream(replication_index)
+    active_pod_location_mode, active_pod_location_seed = prepare_pod_location_stream(
+        replication_index
+    )
+    sim = load_simulation_module()
+    warehouse = sim.warehouse
+    start = time.time()
+    stopped_cleanly = False
+    last_progress_tick = float(warehouse._tick)
+    last_progress_time = start
+    next_checkpoint_tick = checkpoint_ticks if checkpoint_ticks > 0 else None
+
+    print(
+        "[START] "
+        f"scenario={label} "
+        f"run={replication_index}/{run_count} "
+        f"order_mode={active_order_mode} "
+        f"seed={active_seed if active_seed is not None else 'n/a'} "
+        f"pod_location_mode={active_pod_location_mode} "
+        f"pod_location_seed={active_pod_location_seed if active_pod_location_seed is not None else 'n/a'} "
+        f"horizon_tick={horizon_tick:g} "
+        f"run_dir={run_dir}",
+        flush=True,
+    )
+    if shared_order_path is not None:
+        print(
+            f"[ORDER] scenario={label} run={replication_index}/{run_count} shared_order={shared_order_path}",
+            flush=True,
+        )
+    while float(warehouse._tick) < horizon_tick:
+        warehouse.tick()
+        current_tick = float(warehouse._tick)
+        now = time.time()
+        while (
+            next_checkpoint_tick is not None
+            and next_checkpoint_tick < horizon_tick
+            and current_tick >= next_checkpoint_tick
+        ):
+            checkpoint_elapsed = now - start
+            checkpoint_result = build_result_frame(
+                warehouse=warehouse,
+                replication_index=replication_index,
+                active_order_mode=active_order_mode,
+                active_seed=active_seed,
+                active_pod_location_mode=active_pod_location_mode,
+                active_pod_location_seed=active_pod_location_seed,
+                elapsed=checkpoint_elapsed,
+                stopped_cleanly=False,
+                snapshot_kind="checkpoint",
+                snapshot_target_tick=next_checkpoint_tick,
+            )
+            append_result_frame(checkpoint_result)
+            print(
+                "[CHECKPOINT] "
+                f"scenario={label} "
+                f"run={replication_index}/{run_count} "
+                f"tick={current_tick:.2f} "
+                f"checkpoint_tick={next_checkpoint_tick:.0f} "
+                f"elapsed_s={checkpoint_elapsed:.1f} "
+                f"output={output_csv}",
+                flush=True,
+            )
+            next_checkpoint_tick += checkpoint_ticks
+        if PROGRESS_ENABLED and (
+            (current_tick - last_progress_tick) >= PROGRESS_TICKS
+            or (now - last_progress_time) >= PROGRESS_SECONDS
+        ):
+            elapsed_now = now - start
+            print(
+                "[PROGRESS] "
+                f"scenario={label} "
+                f"run={replication_index}/{run_count} "
+                f"order_mode={active_order_mode} "
+                f"tick={current_tick:.2f}/{horizon_tick:.2f} "
+                f"step={int(warehouse._step)} "
+                f"elapsed_s={elapsed_now:.1f}",
+                flush=True,
+            )
+            last_progress_tick = current_tick
+            last_progress_time = now
+        if warehouse.isSimulationComplete():
+            stopped_cleanly = True
+            break
+    elapsed = time.time() - start
+    result = build_result_frame(
+        warehouse=warehouse,
+        replication_index=replication_index,
+        active_order_mode=active_order_mode,
+        active_seed=active_seed,
+        active_pod_location_mode=active_pod_location_mode,
+        active_pod_location_seed=active_pod_location_seed,
+        elapsed=elapsed,
+        stopped_cleanly=stopped_cleanly,
+        snapshot_kind="final",
+        snapshot_target_tick=horizon_tick,
+    )
+    fulfilled = int(result.loc[0, "fulfilled_orders"])
+    arrived = int(result.loc[0, "arrived_orders_by_horizon"])
+    if hasattr(warehouse, "getReplenishmentDebugSummary"):
+        debug_summary = warehouse.getReplenishmentDebugSummary()
+        if debug_summary:
             print(
                 "[REPL_DEBUG] "
                 f"scenario={label} "
@@ -384,14 +465,6 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
 try:
     for replication_index in range(1, run_count + 1):
         result = run_single_replication(replication_index)
-        write_header = not output_csv.exists() or output_csv.stat().st_size == 0
-        result.to_csv(
-            output_csv,
-            index=False,
-            sep=CSV_SEPARATOR,
-            encoding=CSV_ENCODING if write_header else "utf-8",
-            mode="a",
-            header=write_header,
-        )
+        append_result_frame(result)
 finally:
     devnull.close()
