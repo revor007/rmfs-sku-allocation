@@ -148,6 +148,36 @@ class Warehouse:
         self._health_prev_replenishment_trips = 0
         self._health_prev_sku_queue_len = 0
         self._health_prev_unfinished_orders = 0
+        self.repldbg_watchlist_refreshes = 0
+        self.repldbg_critical_sku_total = 0
+        self.repldbg_critical_sku_peak = 0
+        self.repldbg_enqueue_attempts = 0
+        self.repldbg_pending_request_exists_count = 0
+        self.repldbg_no_eligible_pod_count = 0
+        self.repldbg_qj_gate_block_count = 0
+        self.repldbg_dispatch_blocked_no_station = 0
+        self.repldbg_dispatch_blocked_no_robot = 0
+        self.repldbg_dispatch_blocked_pod_not_idle = 0
+        self.repldbg_dispatch_removed_no_longer_needed = 0
+        self.repldbg_dispatched_count = 0
+        self.repldbg_send_success_count = 0
+        self.repldbg_block_escalation_count = 0
+        self.repldbg_max_pending_request_age = 0
+        self.repldbg_max_pending_request_pod = ""
+        self.repldbg_top_no_eligible_skus = ""
+        self.repldbg_top_pending_request_skus = ""
+        self.repldbg_top_qj_gate_pods = ""
+        self.repldbg_top_pod_not_idle_pods = ""
+        self.repldbg_top_no_robot_pods = ""
+        self.repldbg_top_no_station_pods = ""
+        self.repldbg_top_block_escalated_pods = ""
+        self._repldbg_top_no_eligible_skus_counter = Counter()
+        self._repldbg_top_pending_request_skus_counter = Counter()
+        self._repldbg_top_qj_gate_pods_counter = Counter()
+        self._repldbg_top_pod_not_idle_pods_counter = Counter()
+        self._repldbg_top_no_robot_pods_counter = Counter()
+        self._repldbg_top_no_station_pods_counter = Counter()
+        self._repldbg_top_block_escalated_pods_counter = Counter()
     
     def _increase_nested_quantity(self, store: Dict, order_id, sku, qty):
         if order_id is None or sku is None or qty <= 0:
@@ -214,6 +244,56 @@ class Warehouse:
     def _release_job_active_quantities(self, job: Job):
         for order_id, sku, qty in job.orders:
             self._release_active_job_quantity(order_id, sku, qty)
+
+    def _increment_debug_top_counter(self, counter_name: str, key, amount: int = 1):
+        if key is None or amount <= 0:
+            return
+        counter = getattr(self, counter_name, None)
+        if counter is None:
+            return
+        counter[key] += amount
+
+    def _format_debug_top_counter(self, counter_name: str, limit: int = 5) -> str:
+        counter = getattr(self, counter_name, None)
+        if not counter:
+            return ""
+        ranked = sorted(counter.items(), key=lambda item: (-item[1], str(item[0])))
+        return ",".join(f"{key}:{count}" for key, count in ranked[:limit])
+
+    def finalizeReplenishmentDebugSummary(self):
+        current_tick = int(self._tick)
+        max_pending_age = 0
+        max_pending_pod = ""
+        for request in self.pending_replenishment_dispatches:
+            created_tick = int(request.get("created_tick", current_tick))
+            age = max(0, current_tick - created_tick)
+            if age > max_pending_age:
+                max_pending_age = age
+                max_pending_pod = int(request.get("pod_number", -1))
+
+        self.repldbg_max_pending_request_age = max_pending_age
+        self.repldbg_max_pending_request_pod = max_pending_pod
+        self.repldbg_top_no_eligible_skus = self._format_debug_top_counter(
+            "_repldbg_top_no_eligible_skus_counter"
+        )
+        self.repldbg_top_pending_request_skus = self._format_debug_top_counter(
+            "_repldbg_top_pending_request_skus_counter"
+        )
+        self.repldbg_top_qj_gate_pods = self._format_debug_top_counter(
+            "_repldbg_top_qj_gate_pods_counter"
+        )
+        self.repldbg_top_pod_not_idle_pods = self._format_debug_top_counter(
+            "_repldbg_top_pod_not_idle_pods_counter"
+        )
+        self.repldbg_top_no_robot_pods = self._format_debug_top_counter(
+            "_repldbg_top_no_robot_pods_counter"
+        )
+        self.repldbg_top_no_station_pods = self._format_debug_top_counter(
+            "_repldbg_top_no_station_pods_counter"
+        )
+        self.repldbg_top_block_escalated_pods = self._format_debug_top_counter(
+            "_repldbg_top_block_escalated_pods_counter"
+        )
 
     
     def setAssignOrderData(self):
@@ -1348,6 +1428,11 @@ class Warehouse:
 
             station = self.station_manager.findAvailableReplenishmentStation()
             if station is None:
+                self.repldbg_dispatch_blocked_no_station += 1
+                self._increment_debug_top_counter(
+                    "_repldbg_top_no_station_pods_counter",
+                    int(request.get("pod_number", -1)),
+                )
                 break
 
             try:
@@ -1363,15 +1448,26 @@ class Warehouse:
                 continue
 
             if not pod.is_idle:
+                self.repldbg_dispatch_blocked_pod_not_idle += 1
+                self._increment_debug_top_counter(
+                    "_repldbg_top_pod_not_idle_pods_counter",
+                    int(pod.pod_number),
+                )
                 continue
 
             skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
             if not skus_to_replenish:
+                self.repldbg_dispatch_removed_no_longer_needed += 1
                 self.removePendingReplenishmentDispatch(pod.pod_number)
                 continue
 
             robot = self.robot_manager.findNearestAvailableRobot(pod.coordinate)
             if robot is None:
+                self.repldbg_dispatch_blocked_no_robot += 1
+                self._increment_debug_top_counter(
+                    "_repldbg_top_no_robot_pods_counter",
+                    int(pod.pod_number),
+                )
                 break
 
             success = self.sendPodForReplenishment(
@@ -1382,6 +1478,7 @@ class Warehouse:
             )
             if success:
                 dispatched_count += 1
+                self.repldbg_dispatched_count += 1
 
         return dispatched_count
 
@@ -1451,7 +1548,8 @@ class Warehouse:
             
             # Track replenishment metrics
             # self.replenishment_trips += 1
-            
+
+            self.repldbg_send_success_count += 1
             print(f"Successfully created replenishment job for pod {pod.pod_number}")
             return True
             
@@ -2224,6 +2322,13 @@ class Warehouse:
             if current_global_ratio <= threshold_ratio:
                 self.global_critical_skus.add(sku_id)
 
+        self.repldbg_watchlist_refreshes += 1
+        self.repldbg_critical_sku_total += int(len(self.global_critical_skus))
+        self.repldbg_critical_sku_peak = max(
+            self.repldbg_critical_sku_peak,
+            int(len(self.global_critical_skus)),
+        )
+
     def get_pod_average_fill_score(self, pod: Pod) -> float:
         if not pod.skus:
             return 1.0
@@ -2375,6 +2480,12 @@ class Warehouse:
 
             skus_to_replenish, qj_score = self.get_replenishment_skus_for_pod(pod)
             if not skus_to_replenish or sku_id not in skus_to_replenish:
+                if qj_score >= self.pod_replenishment_threshold:
+                    self.repldbg_qj_gate_block_count += 1
+                    self._increment_debug_top_counter(
+                        "_repldbg_top_qj_gate_pods_counter",
+                        int(pod.pod_number),
+                    )
                 continue
 
             sku_details = pod.skus.get(sku_id, {})
@@ -2400,8 +2511,14 @@ class Warehouse:
         return best_candidate
 
     def enqueueBestReplenishmentDispatchForSKU(self, sku_id: int) -> bool:
+        self.repldbg_enqueue_attempts += 1
         existing_request = self.getPendingReplenishmentRequestForSKU(sku_id)
         if existing_request is not None:
+            self.repldbg_pending_request_exists_count += 1
+            self._increment_debug_top_counter(
+                "_repldbg_top_pending_request_skus_counter",
+                int(sku_id),
+            )
             try:
                 existing_pod = self.pod_manager.getPodByNumber(
                     int(existing_request["pod_number"])
@@ -2418,6 +2535,11 @@ class Warehouse:
 
         candidate = self.getMostDepletedEligiblePodForSKU(sku_id)
         if candidate is None:
+            self.repldbg_no_eligible_pod_count += 1
+            self._increment_debug_top_counter(
+                "_repldbg_top_no_eligible_skus_counter",
+                int(sku_id),
+            )
             return False
 
         pod, skus_to_replenish, _ = candidate
@@ -2434,6 +2556,17 @@ class Warehouse:
         for request in self.pending_replenishment_dispatches:
             if not self.shouldGuaranteeReplenishmentRequest(request, current_tick):
                 continue
+
+            if (
+                not bool(request.get("guaranteed_on_release", False))
+                and not bool(request.get("_debug_block_escalated", False))
+            ):
+                request["_debug_block_escalated"] = True
+                self.repldbg_block_escalation_count += 1
+                self._increment_debug_top_counter(
+                    "_repldbg_top_block_escalated_pods_counter",
+                    int(request.get("pod_number", -1)),
+                )
 
             try:
                 pod = self.pod_manager.getPodByNumber(int(request["pod_number"]))
@@ -2456,6 +2589,7 @@ class Warehouse:
 
         skus_to_replenish, _ = self.get_replenishment_skus_for_pod(pod)
         if not skus_to_replenish:
+            self.repldbg_dispatch_removed_no_longer_needed += 1
             self.removePendingReplenishmentDispatch(pod.pod_number)
             return False
 

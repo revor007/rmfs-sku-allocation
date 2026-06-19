@@ -1,0 +1,11 @@
+{
+  "generator": "full_postt_shared_bootstrap",
+  "source_path": "D:\\ITB\\Tugas Akhir\\_full_postt_parallel_runs\\four_scenario_1000_shared_latest\\scenario4_sij\\netlogo-rmfs\\data\\input\\cutoff_test_orders.csv",
+  "seed": 42,
+  "n_orders": 10,
+  "arrival_mode": "empirical_interarrival",
+  "source_unique_orders": 14992,
+  "sampled_unique_source_orders": 10,
+  "generated_unique_orders": 10,
+  "generated_order_lines": 32
+}

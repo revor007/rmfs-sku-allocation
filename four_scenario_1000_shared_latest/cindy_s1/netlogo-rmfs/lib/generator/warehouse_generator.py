@@ -1,4 +1,6 @@
 import os
+import csv
+import random
 from typing import List
 
 from sklearn.cluster import KMeans
@@ -17,6 +19,30 @@ from lib.constant import *
 import time
 
 pods_path = os.path.join(PARENT_DIRECTORY, 'data/output/pods.csv')
+RUNTIME_POD_LOCATION_POLICY_ENV = "RMFS_RUNTIME_POD_LOCATION_POLICY"
+RUNTIME_POD_LOCATION_SEED_ENV = "RMFS_RUNTIME_POD_LOCATION_SEED"
+
+
+def build_runtime_pod_location_mapping(pod_manager: PodManager):
+    total_pods = len(pod_manager.getAllPods())
+    if total_pods <= 0:
+        return {}
+
+    policy = os.getenv(RUNTIME_POD_LOCATION_POLICY_ENV, "identity").strip().lower()
+    if policy == "identity":
+        return {pod_id: pod_id for pod_id in range(total_pods)}
+    if policy != "shuffle":
+        raise ValueError(f"Unsupported runtime pod location policy: {policy}")
+
+    seed = int(os.getenv(RUNTIME_POD_LOCATION_SEED_ENV, "42"))
+    source_ids = list(range(total_pods))
+    shuffled_ids = source_ids.copy()
+    rng = random.Random(seed)
+    rng.shuffle(shuffled_ids)
+    print(
+        f"Applying runtime pod location shuffle: policy={policy}, seed={seed}, total_pods={total_pods}"
+    )
+    return dict(zip(source_ids, shuffled_ids))
 
 def init_robots(warehouse: Warehouse):
     random.seed(42)  # Set a seed for reproducibility - Ryan
@@ -410,12 +436,14 @@ def assign_skus_to_pods(pod_manager):
         assign_skus_to_pods_from_file(pod_manager)
 
 def assign_skus_to_pods_from_file(pod_manager: PodManager):
+    runtime_pod_mapping = build_runtime_pod_location_mapping(pod_manager)
     with open(pods_path, mode='r', newline='') as file:
         reader = csv.DictReader(file)
         row_count = 0
         for row in reader:
             row_count += 1
-            pod_id = int(row['pod_id'])
+            source_pod_id = int(row['pod_id'])
+            pod_id = runtime_pod_mapping.get(source_pod_id, source_pod_id)
             sku = int(row['item'])
             limit_qty = int(row['max_qty'])
             current_qty = int(row['qty'])
