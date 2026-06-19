@@ -34,6 +34,9 @@ POD_LOCATION_MODE_ENV = "FULL_POSTT_POD_LOCATION_MODE"
 POD_LOCATION_BASE_SEED_ENV = "FULL_POSTT_POD_LOCATION_BASE_SEED"
 RUNTIME_POD_LOCATION_POLICY_ENV = "RMFS_RUNTIME_POD_LOCATION_POLICY"
 RUNTIME_POD_LOCATION_SEED_ENV = "RMFS_RUNTIME_POD_LOCATION_SEED"
+STAGE_SOURCE_ROOT_ENV = "FULL_POSTT_STAGE_SOURCE_ROOT"
+SCRIPT_ROOT = Path(__file__).resolve().parent
+WORKSPACE_ROOT = SCRIPT_ROOT.parent
 
 
 def ensure_runtime_input_files(run_root: Path) -> None:
@@ -133,6 +136,146 @@ def append_result_frame(frame: pd.DataFrame) -> None:
         mode="a",
         header=write_header,
     )
+
+
+def _normalize_name(value: str | None) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def _infer_scenario_name(run_root: Path) -> str:
+    if run_root.name == "netlogo-rmfs":
+        return _normalize_name(run_root.parent.name)
+    return _normalize_name(run_root.name)
+
+
+def _parse_metric_summary(summary_path: Path) -> dict[str, str]:
+    if not summary_path.exists():
+        return {}
+
+    frame = pd.read_csv(summary_path, sep=None, engine="python", encoding="utf-8-sig")
+    frame.columns = [str(col).replace("\ufeff", "").strip() for col in frame.columns]
+    if not {"metric", "value"}.issubset(frame.columns):
+        return {}
+    return {
+        str(row.metric).strip(): str(row.value).strip()
+        for row in frame.itertuples(index=False)
+    }
+
+
+def _safe_int(value: object) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+def _infer_stage_source_root(run_root: Path) -> Path | None:
+    explicit_root = os.environ.get(STAGE_SOURCE_ROOT_ENV, "").strip()
+    if explicit_root:
+        candidate = Path(explicit_root).resolve()
+        return candidate if candidate.exists() else None
+
+    scenario_name = _infer_scenario_name(run_root)
+    scenario_to_root = {
+        "scenario4_sij": WORKSPACE_ROOT / "fcgma",
+        "scenario4_sij_fallbackrandom": WORKSPACE_ROOT / "fcgma",
+        "my_scenario": WORKSPACE_ROOT / "revision-fcgma-copy",
+        "my_scenario_fallbackrandom": WORKSPACE_ROOT / "revision-fcgma-copy",
+    }
+    candidate = scenario_to_root.get(scenario_name)
+    if candidate is not None and candidate.exists():
+        return candidate
+    return None
+
+
+def _load_stage_counts(run_root: Path, scenario_metrics: dict[str, str]) -> dict[str, int]:
+    source_root = _infer_stage_source_root(run_root)
+    if source_root is None:
+        return {}
+
+    bc_candidates = [
+        source_root / "Clustering" / "bc-k-means-results.csv",
+        source_root / "bc-k-means-results.csv",
+    ]
+    bc_path = next((path for path in bc_candidates if path.exists()), None)
+    if bc_path is None:
+        return {}
+
+    frame = pd.read_csv(bc_path, sep=None, engine="python", encoding="utf-8-sig")
+    frame.columns = [str(col).replace("\ufeff", "").strip() for col in frame.columns]
+    required = {"new_product_code", "allocation_type"}
+    if not required.issubset(frame.columns):
+        return {}
+
+    frame = frame.copy()
+    frame["new_product_code"] = frame["new_product_code"].astype(str).str.strip()
+    frame = frame[frame["new_product_code"] != ""].drop_duplicates(
+        subset=["new_product_code"],
+        keep="first",
+    )
+
+    allocation_type = frame["allocation_type"].astype(str).str.strip().str.lower()
+    common_mask = allocation_type.str.contains("common", na=False)
+    random_mask = allocation_type.str.contains("random", na=False)
+
+    common_new_skus = int(common_mask.sum())
+    random_new_skus = int(random_mask.sum())
+
+    total_new_skus = _safe_int(scenario_metrics.get("new_skus"))
+    if total_new_skus is not None and (common_new_skus + random_new_skus) > total_new_skus:
+        return {}
+    if random_new_skus == 0 and total_new_skus is not None and total_new_skus >= common_new_skus:
+        random_new_skus = total_new_skus - common_new_skus
+
+    summary = {
+        "common_new_skus": common_new_skus,
+        "random_new_skus": random_new_skus,
+    }
+
+    if "corresponding_historical_product" in frame.columns:
+        summary["common_groups"] = int(
+            frame.loc[common_mask, "corresponding_historical_product"]
+            .astype(str)
+            .str.strip()
+            .replace({"": pd.NA, "nan": pd.NA, "None": pd.NA})
+            .dropna()
+            .nunique()
+        )
+
+    return summary
+
+
+def build_startup_summary(run_root: Path) -> str:
+    summary_path = run_root / "data" / "output" / "cutoff_experiment_input_summary.csv"
+    scenario_metrics = _parse_metric_summary(summary_path)
+    stage_metrics = _load_stage_counts(run_root, scenario_metrics)
+
+    summary_parts = []
+    for metric_name in (
+        "historical_skus",
+        "new_skus",
+        "common_new_skus",
+        "random_new_skus",
+        "common_groups",
+        "pods_used",
+        "occupied_slots",
+        "physical_pods_available",
+    ):
+        raw_value = stage_metrics.get(metric_name)
+        if raw_value is None:
+            raw_value = scenario_metrics.get(metric_name)
+        numeric_value = _safe_int(raw_value)
+        if numeric_value is not None:
+            summary_parts.append(f"{metric_name}={numeric_value}")
+
+    if not summary_parts:
+        return ""
+    return "[INPUT] " + " ".join(summary_parts)
 
 
 def prepare_order_stream(replication_index: int) -> tuple[str, int | None, Path | None]:
@@ -377,6 +520,8 @@ def build_result_frame(
     )
 
 
+startup_summary = build_startup_summary(run_dir)
+
 for replication_index in range(1, run_count + 1):
     active_order_mode, active_seed, shared_order_path = prepare_order_stream(replication_index)
     active_pod_location_mode, active_pod_location_seed = prepare_pod_location_stream(
@@ -406,6 +551,11 @@ for replication_index in range(1, run_count + 1):
         ),
         flush=True,
     )
+    if startup_summary:
+        print(
+            f"{startup_summary} run={replication_index}/{run_count}",
+            flush=True,
+        )
 
     while float(warehouse._tick) < horizon_tick:
         warehouse.tick()
