@@ -1,4 +1,6 @@
+import csv
 import os
+import random
 from typing import List
 
 from sklearn.cluster import KMeans
@@ -17,6 +19,8 @@ from lib.constant import *
 import time
 
 pods_path = os.path.join(PARENT_DIRECTORY, 'data/output/pods.csv')
+RUNTIME_POD_LOCATION_POLICY_ENV = "RMFS_RUNTIME_POD_LOCATION_POLICY"
+RUNTIME_POD_LOCATION_SEED_ENV = "RMFS_RUNTIME_POD_LOCATION_SEED"
 
 def init_robots(warehouse: Warehouse):
     random.seed(42)  # Set a seed for reproducibility - Ryan
@@ -409,13 +413,39 @@ def assign_skus_to_pods(pod_manager):
 
         assign_skus_to_pods_from_file(pod_manager)
 
+
+def build_runtime_pod_id_mapping(pod_manager: PodManager):
+    physical_pod_ids = sorted(pod.pod_number for pod in pod_manager.pods)
+    if not physical_pod_ids:
+        return {}
+
+    location_policy = os.getenv(RUNTIME_POD_LOCATION_POLICY_ENV, "identity").strip().lower()
+    if location_policy != "shuffle" or len(physical_pod_ids) <= 1:
+        return {pod_id: pod_id for pod_id in physical_pod_ids}
+
+    location_seed_raw = os.getenv(RUNTIME_POD_LOCATION_SEED_ENV, "42").strip()
+    try:
+        location_seed = int(location_seed_raw)
+    except ValueError:
+        location_seed = 42
+
+    shuffled_pod_ids = physical_pod_ids[:]
+    rng = random.Random(location_seed)
+    rng.shuffle(shuffled_pod_ids)
+    print(
+        f"Runtime pod-location shuffle enabled: seed={location_seed}, pod_slots={len(physical_pod_ids)}"
+    )
+    return dict(zip(physical_pod_ids, shuffled_pod_ids))
+
 def assign_skus_to_pods_from_file(pod_manager: PodManager):
+    runtime_pod_id_mapping = build_runtime_pod_id_mapping(pod_manager)
     with open(pods_path, mode='r', newline='') as file:
         reader = csv.DictReader(file)
         row_count = 0
         for row in reader:
             row_count += 1
-            pod_id = int(row['pod_id'])
+            source_pod_id = int(row['pod_id'])
+            pod_id = runtime_pod_id_mapping.get(source_pod_id, source_pod_id)
             sku = int(row['item'])
             limit_qty = int(row['max_qty'])
             current_qty = int(row['qty'])
