@@ -10,8 +10,26 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
+SCRIPT_PATH = Path(__file__).resolve()
+BUILDER_FCGMA_DIR = next(
+    (
+        candidate
+        for candidate in (
+            SCRIPT_PATH.parents[1],
+            SCRIPT_PATH.parents[2],
+            SCRIPT_PATH.parents[3],
+        )
+        if (candidate / "experiment_context.py").exists()
+    ),
+    SCRIPT_PATH.parents[1],
+)
+if str(BUILDER_FCGMA_DIR) not in sys.path:
+    sys.path.append(str(BUILDER_FCGMA_DIR))
+
+from experiment_context import load_experiment_context
 from prepare_static_21day_inputs import (
     FCGMA_DIR,
+    assign_abc_classes,
     find_existing_directory,
     normalize_item_code,
     prepare_inputs,
@@ -23,8 +41,20 @@ def load_cindy_candidate_items(
     max_comp_path: Path,
     eligible_master_path: Path | None = None,
 ) -> pd.DataFrame:
-    items = pd.read_csv(items_path)
-    max_comp = pd.read_csv(max_comp_path)
+    items = _read_cindy_profile_csv(items_path)
+    max_comp = _read_cindy_profile_csv(max_comp_path)
+
+    items_item_col = _find_cindy_profile_column(
+        items.columns,
+        ["item_code", "item code", "item", "sku", "sku_id"],
+    )
+    max_comp_item_col = _find_cindy_profile_column(
+        max_comp.columns,
+        ["item_code", "item code", "item", "sku", "sku_id"],
+    )
+
+    items = items.rename(columns={items_item_col: "item_code"}).copy()
+    max_comp = max_comp.rename(columns={max_comp_item_col: "item_code"}).copy()
 
     items["item_code"] = items["item_code"].map(normalize_item_code)
     items["item_initial_quantity_inventory"] = pd.to_numeric(
@@ -52,7 +82,7 @@ def load_cindy_candidate_items(
         eligible_master_path = FCGMA_DIR / "eligible_master_skus.csv"
     eligible_skus: set[str] | None = None
     if eligible_master_path.exists():
-        eligible_master = pd.read_csv(eligible_master_path)
+        eligible_master = _read_cindy_profile_csv(eligible_master_path)
         eligible_skus = set(
             eligible_master.iloc[:, 0].map(normalize_item_code)
         )
@@ -245,12 +275,40 @@ def load_minimum_inventory_profile(minimum_inventory_path: Path) -> dict[str, in
     return dict(zip(profile["item_code"], profile["target_quantity"]))
 
 
+def apply_train_order_abc_classes(
+    items: pd.DataFrame,
+    cutoff_ratio: float | None = None,
+    new_sku_class: str = "C",
+) -> pd.DataFrame:
+    context = load_experiment_context(FCGMA_DIR, cutoff_ratio=cutoff_ratio)
+    train_order_counts = (
+        context.train_eligible_df.groupby("item_code")["order_id"]
+        .nunique()
+        .astype(np.int32)
+    )
+    historical_order_counts = train_order_counts.reindex(context.historical_skus).fillna(0)
+    historical_abc = assign_abc_classes(historical_order_counts.astype(np.int32))
+    new_skus = set(context.new_skus)
+
+    items = items.copy()
+    items["item_order_frequency"] = (
+        items["item_code"].map(train_order_counts).fillna(0).astype(np.int32)
+    )
+    items["item_class"] = items["item_code"].map(historical_abc).fillna(new_sku_class)
+    items.loc[items["item_code"].isin(new_skus), "item_class"] = new_sku_class
+    items["item_class"] = items["item_class"].astype(str).str.strip().replace("", new_sku_class)
+    return items
+
+
 def prepare_cindy_baseline_items(
     items_path: Path,
     max_comp_path: Path,
     required_item_codes: set[str],
     target_quantity_by_sku: dict[str, int] | None = None,
     eligible_master_path: Path | None = None,
+    class_source: str = "train_orders",
+    cutoff_ratio: float | None = None,
+    new_sku_class: str = "C",
 ) -> pd.DataFrame:
     items = load_cindy_candidate_items(
         items_path=items_path,
@@ -284,6 +342,15 @@ def prepare_cindy_baseline_items(
             f"Cindy Scenario 3 rebuild is missing {len(missing_required)} "
             f"required sampled SKUs, for example: {preview}"
         )
+
+    if class_source == "train_orders":
+        items = apply_train_order_abc_classes(
+            items=items,
+            cutoff_ratio=cutoff_ratio,
+            new_sku_class=new_sku_class,
+        )
+    else:
+        items["item_class"] = items["item_class"].astype(str).str.strip()
 
     items["item_class"] = items["item_class"].astype(str).str.strip()
     items["slots_needed"] = np.ceil(
@@ -375,6 +442,9 @@ def build_cindy_scenario3_allocation(
     eligible_master_path: Path | None = None,
     sku_order_policy: str = "frequency_desc",
     sku_order_seed: int | None = None,
+    class_source: str = "train_orders",
+    cutoff_ratio: float | None = None,
+    new_sku_class: str = "C",
 ) -> Path:
     items = prepare_cindy_baseline_items(
         items_path=items_path,
@@ -382,6 +452,9 @@ def build_cindy_scenario3_allocation(
         required_item_codes=required_item_codes,
         target_quantity_by_sku=target_quantity_by_sku,
         eligible_master_path=eligible_master_path,
+        class_source=class_source,
+        cutoff_ratio=cutoff_ratio,
+        new_sku_class=new_sku_class,
     )
 
     class_order = ["A", "B", "C"]
@@ -520,38 +593,23 @@ def build_cindy_baseline_allocation(
     target_quantity_by_sku: dict[str, int] | None = None,
     class_slot_counts: dict[str, int] | None = None,
     eligible_master_path: Path | None = None,
+    class_source: str = "train_orders",
+    cutoff_ratio: float | None = None,
+    new_sku_class: str = "C",
 ) -> Path:
     if class_slot_counts is None:
         class_slot_counts = {"A": 12, "B": 21, "C": 7}
 
-    items = load_cindy_candidate_items(items_path=items_path, max_comp_path=max_comp_path)
-    required_item_codes = {normalize_item_code(code) for code in required_item_codes if normalize_item_code(code)}
-    items = items[items["item_code"].isin(required_item_codes)].copy()
-
-    if target_quantity_by_sku is not None:
-        normalized_budget = {
-            normalize_item_code(item_code): int(np.ceil(quantity))
-            for item_code, quantity in target_quantity_by_sku.items()
-            if normalize_item_code(item_code) and quantity is not None
-        }
-        items["item_initial_quantity_inventory"] = items["item_code"].map(
-            normalized_budget
-        )
-        items = items[
-            pd.to_numeric(items["item_initial_quantity_inventory"], errors="coerce").fillna(0) > 0
-        ].copy()
-
-    missing_required = sorted(required_item_codes - set(items["item_code"]))
-    if missing_required:
-        preview = ", ".join(missing_required[:10])
-        raise ValueError(
-            f"Cindy baseline rebuild is missing {len(missing_required)} required sampled SKUs, for example: {preview}"
-        )
-
-    items["item_class"] = items["item_class"].astype(str).str.strip()
-    items["slots_needed"] = np.ceil(
-        items["item_initial_quantity_inventory"] / items["standard_slot_capacity"]
-    ).astype(int)
+    items = prepare_cindy_baseline_items(
+        items_path=items_path,
+        max_comp_path=max_comp_path,
+        required_item_codes=required_item_codes,
+        target_quantity_by_sku=target_quantity_by_sku,
+        eligible_master_path=eligible_master_path,
+        class_source=class_source,
+        cutoff_ratio=cutoff_ratio,
+        new_sku_class=new_sku_class,
+    )
 
     items = items.sort_values(
         ["item_class", "item_order_frequency", "item_code"],
@@ -626,35 +684,20 @@ def build_cindy_scenario2_allocation(
     eligible_master_path: Path | None = None,
     sku_order_policy: str = "frequency_desc",
     sku_order_seed: int | None = None,
+    class_source: str = "train_orders",
+    cutoff_ratio: float | None = None,
+    new_sku_class: str = "C",
 ) -> Path:
-    items = load_cindy_candidate_items(
+    items = prepare_cindy_baseline_items(
         items_path=items_path,
         max_comp_path=max_comp_path,
+        required_item_codes=required_item_codes,
+        target_quantity_by_sku=target_quantity_by_sku,
         eligible_master_path=eligible_master_path,
+        class_source=class_source,
+        cutoff_ratio=cutoff_ratio,
+        new_sku_class=new_sku_class,
     )
-    required_item_codes = {
-        normalize_item_code(code) for code in required_item_codes if normalize_item_code(code)
-    }
-    items = items[items["item_code"].isin(required_item_codes)].copy()
-
-    if target_quantity_by_sku is not None:
-        normalized_budget = normalize_target_budget(target_quantity_by_sku)
-        items["item_initial_quantity_inventory"] = items["item_code"].map(normalized_budget)
-        items = items[
-            pd.to_numeric(items["item_initial_quantity_inventory"], errors="coerce").fillna(0) > 0
-        ].copy()
-
-    missing_required = sorted(required_item_codes - set(items["item_code"]))
-    if missing_required:
-        preview = ", ".join(missing_required[:10])
-        raise ValueError(
-            f"Cindy Scenario 2 rebuild is missing {len(missing_required)} required sampled SKUs, for example: {preview}"
-        )
-
-    items["item_class"] = items["item_class"].astype(str).str.strip()
-    items["slots_needed"] = np.ceil(
-        items["item_initial_quantity_inventory"] / items["standard_slot_capacity"]
-    ).astype(int)
     items = items.sort_values(
         ["item_class", "item_order_frequency", "item_code"],
         ascending=[True, False, True],
@@ -1252,6 +1295,22 @@ def builder_only_main():
             "as an alias for current_items."
         ),
     )
+    parser.add_argument(
+        "--cindy-class-source",
+        choices=["candidate_items", "train_orders"],
+        default="train_orders",
+        help=(
+            "How Cindy baseline ABC classes are assigned before pod building. "
+            "'train_orders' derives A/B/C from the training-order dataset and "
+            "assigns new SKUs to --new-sku-class."
+        ),
+    )
+    parser.add_argument(
+        "--new-sku-class",
+        choices=["A", "B", "C"],
+        default="C",
+        help="ABC class used for SKUs that are new at the train/test cutoff.",
+    )
     
     parser.add_argument(
         "--scenario2-sku-order-policy",
@@ -1337,6 +1396,9 @@ def builder_only_main():
                     if args.scenario2_sku_order_policy == "seeded_shuffle"
                     else None
                 ),
+                class_source=args.cindy_class_source,
+                cutoff_ratio=args.cutoff_ratio,
+                new_sku_class=args.new_sku_class,
             )
 
         elif args.scenario == "scenario3_baseline":
@@ -1353,6 +1415,9 @@ def builder_only_main():
                     if args.scenario3_sku_order_policy == "seeded_shuffle"
                     else None
                 ),
+                class_source=args.cindy_class_source,
+                cutoff_ratio=args.cutoff_ratio,
+                new_sku_class=args.new_sku_class,
             )
 
     result = prepare_inputs(
