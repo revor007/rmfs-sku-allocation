@@ -15,13 +15,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
-from experiment_context import load_experiment_context, normalize_item_code
+from experiment_context import find_column, load_experiment_context, normalize_item_code
 
 OUTPUT_DIR = Path(__file__).resolve().parent
 OUTPUT_PATH = OUTPUT_DIR / "bc-k-means-results.csv"
 ALLOCATION_SUMMARY_PATH = OUTPUT_DIR / "bc-k-means-allocation-summary.csv"
 ALLOCATION_CHART_PATH = OUTPUT_DIR / "bc-k-means-allocation-summary.png"
 NEW_PRODUCTS_ONLY_PATH = OUTPUT_DIR / "bc-k-means-new-products-only.csv"
+COMMON_SKU_FILTER_SUMMARY_PATH = OUTPUT_DIR / "bc-k-means-common-sku-filter-summary.csv"
+COMMON_SKU_FILTER_DETAILS_PATH = OUTPUT_DIR / "bc-k-means-common-sku-filter-details.csv"
 FIRST_EXAMPLE_CANDIDATE_PATH = OUTPUT_DIR / "bc-k-means-first-example-candidate-dataset.csv"
 FIRST_EXAMPLE_DIAGNOSTIC_SUMMARY_PATH = OUTPUT_DIR / "bc-k-means-first-example-diagnostic-summary.csv"
 FIRST_EXAMPLE_FIRST_PASS_DATASET_PATH = OUTPUT_DIR / "bc-k-means-first-example-first-pass-encoded-dataset.csv"
@@ -49,6 +51,165 @@ def load_product_metadata(product_path: Path) -> pd.DataFrame:
     ).copy()
     df["item_code"] = df["item_code"].map(normalize_item_code)
     return df
+
+
+def resolve_minimum_inventory_path(base_dir: Path) -> Path:
+    candidates = [
+        Path(base_dir) / "minimum_inventory.csv",
+        Path(base_dir) / "minimum_inventory_latest.csv",
+    ]
+    existing = [path for path in candidates if path.exists()]
+    if not existing:
+        searched = ", ".join(str(path) for path in candidates)
+        raise FileNotFoundError(
+            f"Could not locate minimum inventory input for BC-k-means filtering. Searched: {searched}"
+        )
+    return max(existing, key=lambda path: (path.stat().st_mtime, path.name))
+
+
+def load_pairwise_sku_set(path: Path) -> set[str]:
+    df = pd.read_csv(path, sep=";", decimal=",", engine="python", index_col=0)
+    index_skus = {
+        normalize_item_code(value)
+        for value in df.index
+        if normalize_item_code(value)
+    }
+    column_skus = {
+        normalize_item_code(value)
+        for value in df.columns
+        if normalize_item_code(value)
+    }
+    return index_skus & column_skus
+
+
+def load_minimum_inventory_sku_set(path: Path) -> set[str]:
+    df = pd.read_csv(path, sep=";", decimal=",", encoding="utf-8-sig", engine="python")
+    sku_col = find_column(df.columns, ["item_code", "Item Code"])
+    return {
+        sku
+        for sku in df[sku_col].map(normalize_item_code)
+        if sku
+    }
+
+
+def load_max_capacity_sku_set(path: Path) -> set[str]:
+    df = pd.read_csv(path, sep=None, engine="python", encoding="utf-8-sig")
+    sku_col = find_column(df.columns, ["item_code"])
+    return {
+        sku
+        for sku in df[sku_col].map(normalize_item_code)
+        if sku
+    }
+
+
+def build_common_optimizer_sku_filter(context, product_df: pd.DataFrame) -> dict:
+    eligible_skus = {normalize_item_code(code) for code in context.eligible_skus if normalize_item_code(code)}
+    jaccard_skus = load_pairwise_sku_set(BASE_DIR / "jaccard_similarity_matrix.csv")
+    minimum_inventory_skus = load_minimum_inventory_sku_set(resolve_minimum_inventory_path(BASE_DIR))
+    max_capacity_skus = load_max_capacity_sku_set(context.paths.max_capacity_path)
+
+    common_optimizer_skus = (
+        eligible_skus
+        & jaccard_skus
+        & minimum_inventory_skus
+        & max_capacity_skus
+    )
+
+    historical_skus = sorted(
+        code
+        for code in context.historical_skus
+        if normalize_item_code(code) in common_optimizer_skus
+    )
+    new_skus = sorted(
+        code
+        for code in context.new_skus
+        if normalize_item_code(code) in common_optimizer_skus
+    )
+    filtered_product_df = product_df[product_df["item_code"].isin(common_optimizer_skus)].copy()
+
+    original_historical_skus = sorted(
+        normalize_item_code(code)
+        for code in context.historical_skus
+        if normalize_item_code(code)
+    )
+    original_new_skus = sorted(
+        normalize_item_code(code)
+        for code in context.new_skus
+        if normalize_item_code(code)
+    )
+
+    status_rows = []
+    for sku_code in sorted(set(original_historical_skus) | set(original_new_skus)):
+        in_eligible = sku_code in eligible_skus
+        in_jaccard = sku_code in jaccard_skus
+        in_minimum_inventory = sku_code in minimum_inventory_skus
+        in_max_capacity = sku_code in max_capacity_skus
+        in_common_optimizer_universe = sku_code in common_optimizer_skus
+        missing_sources = []
+        if not in_eligible:
+            missing_sources.append("eligible_skus")
+        if not in_jaccard:
+            missing_sources.append("jaccard_similarity_matrix")
+        if not in_minimum_inventory:
+            missing_sources.append("minimum_inventory")
+        if not in_max_capacity:
+            missing_sources.append("max_capacity")
+
+        status_rows.append(
+            {
+                "item_code": sku_code,
+                "sku_role_pre_filter": (
+                    "historical" if sku_code in original_historical_skus else "new"
+                ),
+                "in_eligible_skus": int(in_eligible),
+                "in_jaccard_similarity_matrix": int(in_jaccard),
+                "in_minimum_inventory": int(in_minimum_inventory),
+                "in_max_capacity": int(in_max_capacity),
+                "in_common_optimizer_universe": int(in_common_optimizer_universe),
+                "filter_status": "kept" if in_common_optimizer_universe else "dropped",
+                "missing_sources": "|".join(missing_sources),
+            }
+        )
+
+    status_df = pd.DataFrame(status_rows)
+    summary_df = pd.DataFrame(
+        [
+            {
+                "original_historical_skus": int(len(original_historical_skus)),
+                "filtered_historical_skus": int(len(historical_skus)),
+                "dropped_historical_skus": int(len(original_historical_skus) - len(historical_skus)),
+                "original_new_skus": int(len(original_new_skus)),
+                "filtered_new_skus": int(len(new_skus)),
+                "dropped_new_skus": int(len(original_new_skus) - len(new_skus)),
+                "common_optimizer_skus": int(len(common_optimizer_skus)),
+                "filtered_product_rows": int(len(filtered_product_df)),
+            }
+        ]
+    )
+
+    return {
+        "common_optimizer_skus": common_optimizer_skus,
+        "historical_skus": historical_skus,
+        "new_skus": new_skus,
+        "product_df": filtered_product_df,
+        "status_df": status_df,
+        "summary_df": summary_df,
+    }
+
+
+def export_common_sku_filter_artifacts(status_df: pd.DataFrame, summary_df: pd.DataFrame) -> None:
+    summary_df.to_csv(
+        COMMON_SKU_FILTER_SUMMARY_PATH,
+        index=False,
+        sep=";",
+        encoding="utf-8-sig",
+    )
+    status_df.to_csv(
+        COMMON_SKU_FILTER_DETAILS_PATH,
+        index=False,
+        sep=";",
+        encoding="utf-8-sig",
+    )
 
 
 def prepare_candidate_frame(
@@ -713,8 +874,15 @@ def main():
     product_df = load_product_metadata(context.paths.product_path)
     product_df = product_df[product_df["item_code"].isin(context.eligible_skus)].copy()
 
-    historical_skus = set(context.historical_skus)
-    new_skus = list(context.new_skus)
+    common_filter = build_common_optimizer_sku_filter(context, product_df)
+    export_common_sku_filter_artifacts(
+        common_filter["status_df"],
+        common_filter["summary_df"],
+    )
+
+    product_df = common_filter["product_df"]
+    historical_skus = set(common_filter["historical_skus"])
+    new_skus = list(common_filter["new_skus"])
 
     new_products_df = export_new_products_only_dataset(product_df, new_skus)
 
@@ -758,6 +926,11 @@ def main():
     print(f"Cutoff ratio: {context.cutoff_ratio:.2f}")
     print(f"Cutoff timestamp: {context.cutoff_time}")
     print(f"Eligible master SKUs: {len(context.eligible_skus):,}")
+    print(
+        "Common-SKU filter: "
+        f"historical {len(context.historical_skus):,}->{len(historical_skus):,}, "
+        f"new {len(context.new_skus):,}->{len(new_skus):,}",
+    )
     print(f"Historical SKUs: {len(context.historical_skus):,}")
     print(f"New SKUs: {len(context.new_skus):,}")
     print(f"New-products-only dataset saved to: {NEW_PRODUCTS_ONLY_PATH}")
