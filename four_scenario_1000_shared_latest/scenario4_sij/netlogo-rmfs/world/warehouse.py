@@ -116,6 +116,22 @@ class Warehouse:
             "RMFS_REPL_BYPASS_QJ_FOR_URGENT",
             "0",
         ).strip().lower() in {"1", "true", "yes", "y", "on"}
+        replenishment_qj_bypass_mode = os.getenv(
+            "RMFS_REPL_BYPASS_QJ_MODE",
+            "",
+        ).strip().lower()
+        if replenishment_qj_bypass_mode in {"urgent_only", "urgent"}:
+            self.replenishment_qj_bypass_mode = "urgent_only"
+        elif replenishment_qj_bypass_mode in {"pending_request", "pending"}:
+            self.replenishment_qj_bypass_mode = "pending_request"
+        elif replenishment_qj_bypass_mode in {"off", "0", "false", "no", "n"}:
+            self.replenishment_qj_bypass_mode = "off"
+        else:
+            self.replenishment_qj_bypass_mode = (
+                "urgent_only"
+                if self.replenishment_allow_urgent_qj_bypass
+                else "off"
+            )
         self.last_watchlist_refresh_tick = -1
         self.last_hold_recheck_tick = -1
         
@@ -2371,13 +2387,18 @@ class Warehouse:
         request: Optional[Dict] = None,
         current_tick: Optional[int] = None,
     ) -> bool:
-        if not self.replenishment_allow_urgent_qj_bypass:
+        if self.replenishment_qj_bypass_mode == "off":
             return False
 
         if current_tick is None:
             current_tick = int(self._tick)
 
         if request is not None:
+            if (
+                self.replenishment_qj_bypass_mode == "pending_request"
+                and request.get("skus_to_replenish")
+            ):
+                return True
             if bool(request.get("guaranteed_on_release", False)):
                 return True
             if self.shouldGuaranteeReplenishmentRequest(request, current_tick):
