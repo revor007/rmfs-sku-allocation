@@ -32,6 +32,8 @@ BOOTSTRAP_N_ORDERS_ENV = "FULL_POSTT_BOOTSTRAP_N_ORDERS"
 BOOTSTRAP_SHARED_ORDER_PATH_ENV = "FULL_POSTT_SHARED_BOOTSTRAP_ORDER_PATH"
 POD_LOCATION_MODE_ENV = "FULL_POSTT_POD_LOCATION_MODE"
 POD_LOCATION_BASE_SEED_ENV = "FULL_POSTT_POD_LOCATION_BASE_SEED"
+POD_LOCATION_FIXED_ENV = "FULL_POSTT_POD_LOCATION_FIXED"
+POD_LOCATION_INCREMENT_EVERY_ENV = "FULL_POSTT_POD_LOCATION_INCREMENT_EVERY"
 RUNTIME_POD_LOCATION_POLICY_ENV = "RMFS_RUNTIME_POD_LOCATION_POLICY"
 RUNTIME_POD_LOCATION_SEED_ENV = "RMFS_RUNTIME_POD_LOCATION_SEED"
 
@@ -182,6 +184,22 @@ bootstrap_n_orders = (
 )
 pod_location_mode = os.environ.get(POD_LOCATION_MODE_ENV, "identity").strip().lower()
 pod_location_base_seed = int(os.environ.get(POD_LOCATION_BASE_SEED_ENV, "42"))
+pod_location_fixed = os.environ.get(POD_LOCATION_FIXED_ENV, "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+pod_location_increment_every_raw = os.environ.get(
+    POD_LOCATION_INCREMENT_EVERY_ENV,
+    "",
+).strip()
+pod_location_increment_every = (
+    int(pod_location_increment_every_raw)
+    if pod_location_increment_every_raw != ""
+    else None
+)
 
 if run_count <= 0:
     raise SystemExit("run_count must be a positive integer.")
@@ -189,6 +207,8 @@ if order_mode not in {"fixed_actual", "bootstrap_actual"}:
     raise SystemExit("FULL_POSTT_ORDER_MODE must be either 'fixed_actual' or 'bootstrap_actual'.")
 if pod_location_mode not in {"identity", "shuffle"}:
     raise SystemExit("FULL_POSTT_POD_LOCATION_MODE must be either 'identity' or 'shuffle'.")
+if pod_location_increment_every is not None and pod_location_increment_every <= 0:
+    raise SystemExit("FULL_POSTT_POD_LOCATION_INCREMENT_EVERY must be a positive integer.")
 
 ensure_runtime_input_files(run_dir)
 output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -237,7 +257,14 @@ def prepare_pod_location_stream(replication_index: int) -> tuple[str, int | None
         os.environ.pop(RUNTIME_POD_LOCATION_SEED_ENV, None)
         return pod_location_mode, None
 
-    current_seed = pod_location_base_seed + (replication_index - 1)
+    if pod_location_fixed:
+        current_seed = pod_location_base_seed
+    elif pod_location_increment_every is not None:
+        current_seed = pod_location_base_seed + (
+            (replication_index - 1) // pod_location_increment_every
+        )
+    else:
+        current_seed = pod_location_base_seed + (replication_index - 1)
     os.environ[RUNTIME_POD_LOCATION_POLICY_ENV] = "shuffle"
     os.environ[RUNTIME_POD_LOCATION_SEED_ENV] = str(current_seed)
     return pod_location_mode, current_seed
