@@ -132,6 +132,20 @@ class Warehouse:
                 if self.replenishment_allow_urgent_qj_bypass
                 else "off"
             )
+        self.replenishment_block_escalation_enabled = os.getenv(
+            "RMFS_REPL_BLOCK_ESCALATION_ENABLE",
+            "0",
+        ).strip().lower() in {"1", "true", "yes", "y", "on"}
+        self.replenishment_block_escalation_blocks = int(
+            os.getenv("RMFS_REPL_BLOCK_ESCALATION_BLOCKS", "3")
+        )
+        self.replenishment_block_escalation_age = int(
+            os.getenv("RMFS_REPL_BLOCK_ESCALATION_AGE", "0")
+        )
+        self.replenishment_escalated_bypass_qj = os.getenv(
+            "RMFS_REPL_ESCALATED_BYPASS_QJ",
+            "0",
+        ).strip().lower() in {"1", "true", "yes", "y", "on"}
         self.last_watchlist_refresh_tick = -1
         self.last_hold_recheck_tick = -1
         
@@ -1305,6 +1319,12 @@ class Warehouse:
                 bool(existing_request.get("guaranteed_on_release", False))
                 or merged_urgency > 0
             )
+            existing_request["blocked_dispatch_count"] = int(
+                existing_request.get("blocked_dispatch_count", 0)
+            )
+            existing_request["escalated_on_blocking"] = bool(
+                existing_request.get("escalated_on_blocking", False)
+            )
             pod.has_pending_replenishment_dispatch = True
             if bool(existing_request.get("guaranteed_on_release", False)):
                 pod.must_replenish_before_pick = True
@@ -1317,6 +1337,8 @@ class Warehouse:
                 "created_tick": int(self._tick),
                 "urgency_level": int(urgency_level),
                 "guaranteed_on_release": bool(urgency_level > 0),
+                "blocked_dispatch_count": 0,
+                "escalated_on_blocking": False,
             }
         )
         pod.has_pending_replenishment_dispatch = True
@@ -1368,6 +1390,7 @@ class Warehouse:
 
             station = self.station_manager.findAvailableReplenishmentStation()
             if station is None:
+                self.markBlockedReplenishmentRequest(request, current_tick=current_tick)
                 break
 
             try:
@@ -1383,6 +1406,7 @@ class Warehouse:
                 continue
 
             if not pod.is_idle:
+                self.markBlockedReplenishmentRequest(request, pod=pod, current_tick=current_tick)
                 continue
 
             skus_to_replenish, _ = self.get_replenishment_skus_for_pod(
@@ -1395,6 +1419,7 @@ class Warehouse:
 
             robot = self.robot_manager.findNearestAvailableRobot(pod.coordinate)
             if robot is None:
+                self.markBlockedReplenishmentRequest(request, pod=pod, current_tick=current_tick)
                 break
 
             success = self.sendPodForReplenishment(
@@ -1404,6 +1429,7 @@ class Warehouse:
                 robot,
             )
             if success:
+                request["blocked_dispatch_count"] = 0
                 dispatched_count += 1
 
         return dispatched_count
@@ -2329,6 +2355,7 @@ class Warehouse:
             qj_score >= self.pod_replenishment_threshold
             and not self.shouldBypassReplenishmentQj(
                 skus_to_check=critical_skus,
+                pod=pod,
                 request=request,
                 current_tick=int(self._tick),
             )
@@ -2384,14 +2411,24 @@ class Warehouse:
     def shouldBypassReplenishmentQj(
         self,
         skus_to_check=None,
+        pod: Optional[Pod] = None,
         request: Optional[Dict] = None,
         current_tick: Optional[int] = None,
     ) -> bool:
-        if self.replenishment_qj_bypass_mode == "off":
-            return False
-
         if current_tick is None:
             current_tick = int(self._tick)
+
+        if (
+            self.replenishment_escalated_bypass_qj
+            and (
+                (request is not None and self.isBlockedReplenishmentRequestEscalated(request, current_tick))
+                or (pod is not None and bool(getattr(pod, "must_replenish_before_pick", False)))
+            )
+        ):
+            return True
+
+        if self.replenishment_qj_bypass_mode == "off":
+            return False
 
         if request is not None:
             if (
@@ -2407,6 +2444,77 @@ class Warehouse:
                 return True
 
         return self.getReplenishmentUrgencyLevel(skus_to_check or []) > 0
+
+    def isBlockedReplenishmentRequestEscalated(
+        self,
+        request: Optional[Dict],
+        current_tick: Optional[int] = None,
+    ) -> bool:
+        if request is None:
+            return False
+        if bool(request.get("escalated_on_blocking", False)):
+            return True
+        if not self.replenishment_block_escalation_enabled:
+            return False
+        if (
+            not bool(request.get("guaranteed_on_release", False))
+            and int(request.get("urgency_level", 0)) <= 0
+        ):
+            return False
+
+        if current_tick is None:
+            current_tick = int(self._tick)
+
+        blocked_count = int(request.get("blocked_dispatch_count", 0))
+        blocked_threshold = max(1, int(self.replenishment_block_escalation_blocks))
+        if blocked_count >= blocked_threshold:
+            return True
+
+        age_threshold = int(self.replenishment_block_escalation_age)
+        if age_threshold > 0:
+            wait_time = current_tick - int(request.get("created_tick", current_tick))
+            if wait_time >= age_threshold:
+                return True
+
+        return False
+
+    def applyBlockedReplenishmentEscalation(
+        self,
+        request: Optional[Dict],
+        pod: Optional[Pod] = None,
+        current_tick: Optional[int] = None,
+    ) -> bool:
+        if not self.isBlockedReplenishmentRequestEscalated(request, current_tick):
+            return False
+
+        request["escalated_on_blocking"] = True
+
+        if pod is None and request is not None:
+            try:
+                pod = self.pod_manager.getPodByNumber(int(request["pod_number"]))
+            except (IndexError, TypeError, KeyError):
+                pod = None
+
+        if pod is not None and not pod.is_awaiting_replenishment:
+            pod.must_replenish_before_pick = True
+
+        return True
+
+    def markBlockedReplenishmentRequest(
+        self,
+        request: Optional[Dict],
+        pod: Optional[Pod] = None,
+        current_tick: Optional[int] = None,
+    ):
+        if request is None:
+            return
+
+        request["blocked_dispatch_count"] = int(request.get("blocked_dispatch_count", 0)) + 1
+        self.applyBlockedReplenishmentEscalation(
+            request=request,
+            pod=pod,
+            current_tick=current_tick,
+        )
 
     def shouldGuaranteeReplenishmentRequest(
         self,
@@ -2493,16 +2601,23 @@ class Warehouse:
             pod.must_replenish_before_pick = False
 
         for request in self.pending_replenishment_dispatches:
-            if not self.shouldGuaranteeReplenishmentRequest(request, current_tick):
-                continue
-
             try:
                 pod = self.pod_manager.getPodByNumber(int(request["pod_number"]))
             except (IndexError, TypeError):
                 pod = None
 
-            if pod is not None and not pod.is_awaiting_replenishment:
+            if pod is None or pod.is_awaiting_replenishment:
+                continue
+
+            if self.shouldGuaranteeReplenishmentRequest(request, current_tick):
                 pod.must_replenish_before_pick = True
+                continue
+
+            self.applyBlockedReplenishmentEscalation(
+                request=request,
+                pod=pod,
+                current_tick=current_tick,
+            )
 
     def tryGuaranteeReplenishmentOnRelease(self, pod: Pod, robot: Robot) -> bool:
         if pod is None or robot is None:
