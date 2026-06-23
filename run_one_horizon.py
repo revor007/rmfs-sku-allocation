@@ -30,6 +30,7 @@ ORDER_MODE_ENV = "FULL_POSTT_ORDER_MODE"
 BOOTSTRAP_BASE_SEED_ENV = "FULL_POSTT_BOOTSTRAP_BASE_SEED"
 BOOTSTRAP_ARRIVAL_MODE_ENV = "FULL_POSTT_BOOTSTRAP_ARRIVAL_MODE"
 BOOTSTRAP_N_ORDERS_ENV = "FULL_POSTT_BOOTSTRAP_N_ORDERS"
+BOOTSTRAP_INCREMENT_EVERY_ENV = "FULL_POSTT_BOOTSTRAP_INCREMENT_EVERY"
 BOOTSTRAP_SHARED_ORDER_PATH_ENV = "FULL_POSTT_SHARED_BOOTSTRAP_ORDER_PATH"
 DIAGNOSTIC_CHECKPOINTS_ENV = "FULL_POSTT_DIAGNOSTIC_CHECKPOINTS"
 CHECKPOINT_TICKS_ENV = "FULL_POSTT_CHECKPOINT_TICKS"
@@ -185,6 +186,15 @@ bootstrap_n_orders = (
     if bootstrap_n_orders_raw is not None and bootstrap_n_orders_raw.strip() != ""
     else None
 )
+bootstrap_increment_every_raw = os.environ.get(
+    BOOTSTRAP_INCREMENT_EVERY_ENV,
+    "",
+).strip()
+bootstrap_increment_every = (
+    int(bootstrap_increment_every_raw)
+    if bootstrap_increment_every_raw != ""
+    else None
+)
 diagnostic_checkpoints_enabled = os.environ.get(
     DIAGNOSTIC_CHECKPOINTS_ENV,
     "0",
@@ -219,6 +229,8 @@ if run_count <= 0:
     raise SystemExit("run_count must be a positive integer.")
 if order_mode not in {"fixed_actual", "bootstrap_actual"}:
     raise SystemExit("FULL_POSTT_ORDER_MODE must be either 'fixed_actual' or 'bootstrap_actual'.")
+if bootstrap_increment_every is not None and bootstrap_increment_every <= 0:
+    raise SystemExit("FULL_POSTT_BOOTSTRAP_INCREMENT_EVERY must be a positive integer.")
 if pod_location_mode not in {"identity", "shuffle"}:
     raise SystemExit("FULL_POSTT_POD_LOCATION_MODE must be either 'identity' or 'shuffle'.")
 if pod_location_increment_every is not None and pod_location_increment_every <= 0:
@@ -254,7 +266,12 @@ def prepare_order_stream(replication_index: int) -> tuple[str, int | None, Path 
         os.environ.pop(BOOTSTRAP_SHARED_ORDER_PATH_ENV, None)
         return order_mode, None, None
 
-    current_seed = bootstrap_base_seed + (replication_index - 1)
+    if bootstrap_increment_every is not None:
+        current_seed = bootstrap_base_seed + (
+            (replication_index - 1) % bootstrap_increment_every
+        )
+    else:
+        current_seed = bootstrap_base_seed + (replication_index - 1)
     shared_order_path = ensure_shared_bootstrap_order_file(
         run_root=run_dir,
         seed=current_seed,
