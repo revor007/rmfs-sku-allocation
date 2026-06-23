@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -30,6 +31,8 @@ BOOTSTRAP_BASE_SEED_ENV = "FULL_POSTT_BOOTSTRAP_BASE_SEED"
 BOOTSTRAP_ARRIVAL_MODE_ENV = "FULL_POSTT_BOOTSTRAP_ARRIVAL_MODE"
 BOOTSTRAP_N_ORDERS_ENV = "FULL_POSTT_BOOTSTRAP_N_ORDERS"
 BOOTSTRAP_SHARED_ORDER_PATH_ENV = "FULL_POSTT_SHARED_BOOTSTRAP_ORDER_PATH"
+DIAGNOSTIC_CHECKPOINTS_ENV = "FULL_POSTT_DIAGNOSTIC_CHECKPOINTS"
+CHECKPOINT_TICKS_ENV = "FULL_POSTT_CHECKPOINT_TICKS"
 POD_LOCATION_MODE_ENV = "FULL_POSTT_POD_LOCATION_MODE"
 POD_LOCATION_BASE_SEED_ENV = "FULL_POSTT_POD_LOCATION_BASE_SEED"
 POD_LOCATION_FIXED_ENV = "FULL_POSTT_POD_LOCATION_FIXED"
@@ -182,6 +185,17 @@ bootstrap_n_orders = (
     if bootstrap_n_orders_raw is not None and bootstrap_n_orders_raw.strip() != ""
     else None
 )
+diagnostic_checkpoints_enabled = os.environ.get(
+    DIAGNOSTIC_CHECKPOINTS_ENV,
+    "0",
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+}
+checkpoint_ticks = max(1.0, float(os.environ.get(CHECKPOINT_TICKS_ENV, "20000")))
 pod_location_mode = os.environ.get(POD_LOCATION_MODE_ENV, "identity").strip().lower()
 pod_location_base_seed = int(os.environ.get(POD_LOCATION_BASE_SEED_ENV, "42"))
 pod_location_fixed = os.environ.get(POD_LOCATION_FIXED_ENV, "0").strip().lower() in {
@@ -299,6 +313,8 @@ def build_result_frame(
     active_pod_location_seed: int | None,
     elapsed: float,
     stopped_cleanly: bool,
+    result_kind: str,
+    checkpoint_target_tick: float | None,
 ) -> pd.DataFrame:
     if (
         hasattr(warehouse, "refreshSimulationHealth")
@@ -318,93 +334,176 @@ def build_result_frame(
     fixed_energy = float(warehouse.total_fixed_load_energy)
     variable_energy = max(0.0, energy - fixed_energy)
 
-    return pd.DataFrame(
-        [
+    row = {
+        "scenario": label,
+        "result_kind": result_kind,
+        "checkpoint_target_tick": checkpoint_target_tick,
+        "checkpoint_interval_ticks": checkpoint_ticks if diagnostic_checkpoints_enabled else None,
+        "replication": replication_index,
+        "replications_total": run_count,
+        "order_mode": active_order_mode,
+        "bootstrap_seed": active_bootstrap_seed,
+        "pod_location_mode": active_pod_location_mode,
+        "pod_location_seed": active_pod_location_seed,
+        "ticks_elapsed": float(warehouse._tick),
+        "steps_elapsed": int(warehouse._step),
+        "stopped_cleanly_before_horizon": int(stopped_cleanly),
+        "arrived_orders_by_horizon": arrived,
+        "fulfilled_orders": fulfilled,
+        "fulfilled_over_arrived": (fulfilled / arrived) if arrived else 0.0,
+        "throughput_orders_per_hour": (
+            fulfilled / (float(warehouse._tick) / 60.0)
+        )
+        if float(warehouse._tick) > 0
+        else 0.0,
+        "on_hold_orders": on_hold,
+        "unfinished_orders": int(len(warehouse.order_manager.unfinished_orders)),
+        "job_queue_length": int(len(warehouse.job_queue)),
+        "sku_queue_length": int(len(warehouse.sku_picking_queue)),
+        "pod_visits": pod_visits,
+        "delivered_order_lines": delivered_order_lines,
+        "picked_units": picked_units,
+        "delivered_order_lines_per_pod_visit": (
+            delivered_order_lines / pod_visits
+        )
+        if pod_visits
+        else 0.0,
+        "picked_units_per_pod_visit": (picked_units / pod_visits) if pod_visits else 0.0,
+        "replenishment_count": int(warehouse.replenishment_count),
+        "replenishment_trips": int(warehouse.replenishment_trips),
+        "health_status_final": getattr(warehouse, "health_status", "unknown"),
+        "health_consistency_violations": int(
+            getattr(warehouse, "health_consistency_violations", 0)
+        ),
+        "health_zombie_orders": int(
+            getattr(warehouse, "health_zombie_order_count", 0)
+        ),
+        "health_pending_replenishment_count": int(
+            getattr(warehouse, "health_pending_replenishment_count", 0)
+        ),
+        "health_aged_pending_replenishment_count": int(
+            getattr(warehouse, "health_aged_pending_replenishment_count", 0)
+        ),
+        "health_oldest_pending_replenishment_age": int(
+            getattr(warehouse, "health_oldest_pending_replenishment_age", 0)
+        ),
+        "health_last_progress_tick": int(
+            getattr(warehouse, "health_last_progress_tick", 0)
+        ),
+        "health_progress_gap": max(
+            0,
+            int(float(warehouse._tick)) - int(getattr(warehouse, "health_last_progress_tick", 0)),
+        ),
+        "health_stalled_tick_count": int(
+            getattr(warehouse, "health_stalled_tick_count", 0)
+        ),
+        "stop_and_go": int(warehouse.stop_and_go),
+        "total_energy": energy,
+        "total_fixed_load_energy": fixed_energy,
+        "variable_energy": variable_energy,
+        "energy_per_fulfilled_order": (energy / fulfilled) if fulfilled else 0.0,
+        "fixed_energy_per_fulfilled_order": (
+            fixed_energy / fulfilled
+        )
+        if fulfilled
+        else 0.0,
+        "variable_energy_per_delivered_line": (
+            variable_energy / delivered_order_lines
+        )
+        if delivered_order_lines
+        else 0.0,
+        "energy_per_pod_visit": (energy / pod_visits) if pod_visits else 0.0,
+        "variable_energy_per_pod_visit": (
+            variable_energy / pod_visits
+        )
+        if pod_visits
+        else 0.0,
+        "wall_clock_seconds": elapsed,
+    }
+
+    if diagnostic_checkpoints_enabled:
+        robots = list(getattr(warehouse.robot_manager, "getAllRobots", lambda: [])())
+        robot_state_counts = Counter(
+            str(getattr(robot, "current_state", "unknown") or "unknown")
+            for robot in robots
+        )
+        available_robot_count = sum(
+            1
+            for robot in robots
+            if (getattr(robot, "job", None) is None or getattr(robot.job, "is_finished", False))
+            and getattr(robot, "current_state", None) == "idle"
+        )
+        row.update(
             {
-                "scenario": label,
-                "replication": replication_index,
-                "replications_total": run_count,
-                "order_mode": active_order_mode,
-                "bootstrap_seed": active_bootstrap_seed,
-                "pod_location_mode": active_pod_location_mode,
-                "pod_location_seed": active_pod_location_seed,
-                "ticks_elapsed": float(warehouse._tick),
-                "steps_elapsed": int(warehouse._step),
-                "stopped_cleanly_before_horizon": int(stopped_cleanly),
-                "arrived_orders_by_horizon": arrived,
-                "fulfilled_orders": fulfilled,
-                "fulfilled_over_arrived": (fulfilled / arrived) if arrived else 0.0,
-                "throughput_orders_per_hour": (
-                    fulfilled / (float(warehouse._tick) / 60.0)
-                )
-                if float(warehouse._tick) > 0
-                else 0.0,
-                "on_hold_orders": on_hold,
-                "unfinished_orders": int(len(warehouse.order_manager.unfinished_orders)),
-                "job_queue_length": int(len(warehouse.job_queue)),
-                "sku_queue_length": int(len(warehouse.sku_picking_queue)),
-                "pod_visits": pod_visits,
-                "delivered_order_lines": delivered_order_lines,
-                "picked_units": picked_units,
-                "delivered_order_lines_per_pod_visit": (
-                    delivered_order_lines / pod_visits
-                )
-                if pod_visits
-                else 0.0,
-                "picked_units_per_pod_visit": (picked_units / pod_visits) if pod_visits else 0.0,
-                "replenishment_count": int(warehouse.replenishment_count),
-                "replenishment_trips": int(warehouse.replenishment_trips),
-                "health_status_final": getattr(warehouse, "health_status", "unknown"),
-                "health_consistency_violations": int(
-                    getattr(warehouse, "health_consistency_violations", 0)
+                "diag_pending_replenishment_requests_current": int(
+                    len(getattr(warehouse, "pending_replenishment_dispatches", []))
                 ),
-                "health_zombie_orders": int(
-                    getattr(warehouse, "health_zombie_order_count", 0)
+                "diag_blocked_replenishment_no_robot_total": int(
+                    getattr(warehouse, "diag_blocked_replenishment_no_robot_total", 0)
                 ),
-                "health_pending_replenishment_count": int(
-                    getattr(warehouse, "health_pending_replenishment_count", 0)
+                "diag_blocked_replenishment_pod_not_idle_total": int(
+                    getattr(warehouse, "diag_blocked_replenishment_pod_not_idle_total", 0)
                 ),
-                "health_aged_pending_replenishment_count": int(
-                    getattr(warehouse, "health_aged_pending_replenishment_count", 0)
+                "diag_blocked_replenishment_no_station_total": int(
+                    getattr(warehouse, "diag_blocked_replenishment_no_station_total", 0)
                 ),
-                "health_oldest_pending_replenishment_age": int(
-                    getattr(warehouse, "health_oldest_pending_replenishment_age", 0)
+                "diag_replenishment_trips_since_last_fulfillment_rise": int(
+                    getattr(
+                        warehouse,
+                        "diag_replenishment_trips_since_last_fulfillment_rise",
+                        0,
+                    )
                 ),
-                "health_last_progress_tick": int(
-                    getattr(warehouse, "health_last_progress_tick", 0)
+                "diag_last_fulfillment_rise_tick": int(
+                    getattr(warehouse, "diag_last_fulfillment_rise_tick", 0)
                 ),
-                "health_progress_gap": max(
-                    0,
-                    int(float(warehouse._tick)) - int(getattr(warehouse, "health_last_progress_tick", 0)),
+                "diag_robot_state_idle": int(robot_state_counts.get("idle", 0)),
+                "diag_robot_state_taking_pod": int(robot_state_counts.get("taking_pod", 0)),
+                "diag_robot_state_delivering_pod": int(
+                    robot_state_counts.get("delivering_pod", 0)
                 ),
-                "health_stalled_tick_count": int(
-                    getattr(warehouse, "health_stalled_tick_count", 0)
+                "diag_robot_state_station_processing": int(
+                    robot_state_counts.get("station_processing", 0)
                 ),
-                "stop_and_go": int(warehouse.stop_and_go),
-                "total_energy": energy,
-                "total_fixed_load_energy": fixed_energy,
-                "variable_energy": variable_energy,
-                "energy_per_fulfilled_order": (energy / fulfilled) if fulfilled else 0.0,
-                "fixed_energy_per_fulfilled_order": (
-                    fixed_energy / fulfilled
-                )
-                if fulfilled
-                else 0.0,
-                "variable_energy_per_delivered_line": (
-                    variable_energy / delivered_order_lines
-                )
-                if delivered_order_lines
-                else 0.0,
-                "energy_per_pod_visit": (energy / pod_visits) if pod_visits else 0.0,
-                "variable_energy_per_pod_visit": (
-                    variable_energy / pod_visits
-                )
-                if pod_visits
-                else 0.0,
-                "wall_clock_seconds": elapsed,
+                "diag_robot_state_returning_pod": int(
+                    robot_state_counts.get("returning_pod", 0)
+                ),
+                "diag_robot_state_other": int(
+                    sum(
+                        count
+                        for state, count in robot_state_counts.items()
+                        if state
+                        not in {
+                            "idle",
+                            "taking_pod",
+                            "delivering_pod",
+                            "station_processing",
+                            "returning_pod",
+                        }
+                    )
+                ),
+                "diag_robot_idle_time_gt_20": int(
+                    sum(1 for robot in robots if int(getattr(robot, "idle_time", 0)) > 20)
+                ),
+                "diag_robot_idle_time_gt_300": int(
+                    sum(1 for robot in robots if int(getattr(robot, "idle_time", 0)) > 300)
+                ),
+                "diag_robot_idle_time_gt_1200": int(
+                    sum(1 for robot in robots if int(getattr(robot, "idle_time", 0)) > 1200)
+                ),
+                "diag_robot_pod_carrying_congested": int(
+                    sum(
+                        1
+                        for robot in robots
+                        if getattr(robot, "current_state", None) in {"delivering_pod", "returning_pod"}
+                        and int(getattr(robot, "idle_time", 0)) > 1200
+                    )
+                ),
+                "diag_robot_available_count": int(available_robot_count),
             }
-        ]
-    )
+        )
+
+    return pd.DataFrame([row])
 
 
 def run_single_replication(replication_index: int) -> pd.DataFrame:
@@ -436,6 +535,7 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
     stopped_cleanly = False
     last_progress_tick = float(warehouse._tick)
     last_progress_time = start
+    next_checkpoint_tick = checkpoint_ticks if diagnostic_checkpoints_enabled else None
 
     while float(warehouse._tick) < horizon_tick:
         warehouse.tick()
@@ -458,6 +558,38 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
             )
             last_progress_tick = current_tick
             last_progress_time = now
+        while (
+            diagnostic_checkpoints_enabled
+            and next_checkpoint_tick is not None
+            and next_checkpoint_tick < horizon_tick
+            and current_tick >= next_checkpoint_tick
+        ):
+            checkpoint_result = build_result_frame(
+                warehouse=warehouse,
+                replication_index=replication_index,
+                active_order_mode=active_order_mode,
+                active_bootstrap_seed=active_bootstrap_seed,
+                active_pod_location_mode=active_pod_location_mode,
+                active_pod_location_seed=active_pod_location_seed,
+                elapsed=now - start,
+                stopped_cleanly=False,
+                result_kind="checkpoint",
+                checkpoint_target_tick=next_checkpoint_tick,
+            )
+            append_result_frame(checkpoint_result)
+            print(
+                "[CHECKPOINT] "
+                f"scenario={label} "
+                f"run={replication_index}/{run_count} "
+                f"tick={current_tick:.2f} "
+                f"target_tick={next_checkpoint_tick:.0f} "
+                f"pending_repl={int(len(getattr(warehouse, 'pending_replenishment_dispatches', [])))} "
+                f"blocked_no_robot={int(getattr(warehouse, 'diag_blocked_replenishment_no_robot_total', 0))} "
+                f"blocked_pod_not_idle={int(getattr(warehouse, 'diag_blocked_replenishment_pod_not_idle_total', 0))} "
+                f"available_robots={int(checkpoint_result.loc[0, 'diag_robot_available_count'])}",
+                flush=True,
+            )
+            next_checkpoint_tick += checkpoint_ticks
         if warehouse.isSimulationComplete():
             stopped_cleanly = True
             break
@@ -472,6 +604,8 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
         active_pod_location_seed=active_pod_location_seed,
         elapsed=elapsed,
         stopped_cleanly=stopped_cleanly,
+        result_kind="final",
+        checkpoint_target_tick=horizon_tick if diagnostic_checkpoints_enabled else None,
     )
     fulfilled = int(result.loc[0, "fulfilled_orders"])
     arrived = int(result.loc[0, "arrived_orders_by_horizon"])

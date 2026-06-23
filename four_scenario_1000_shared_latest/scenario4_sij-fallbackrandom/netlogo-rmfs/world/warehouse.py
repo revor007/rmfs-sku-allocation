@@ -156,6 +156,10 @@ class Warehouse:
         self.replenishment_dispatch_aging_ticks = int(
             os.getenv("RMFS_REPLENISHMENT_AGING_TICKS", "300")
         )
+        self.diagnostic_checkpoints_enabled = os.getenv(
+            "FULL_POSTT_DIAGNOSTIC_CHECKPOINTS",
+            "0",
+        ).strip().lower() in {"1", "true", "yes", "y", "on"}
         self.health_check_interval = int(os.getenv("RMFS_HEALTH_CHECK_INTERVAL", "0"))
         self.health_stall_ticks = int(os.getenv("RMFS_HEALTH_STALL_TICKS", "600"))
         self.persist_assign_order_csv = os.getenv(
@@ -182,6 +186,13 @@ class Warehouse:
         self._health_prev_replenishment_trips = 0
         self._health_prev_sku_queue_len = 0
         self._health_prev_unfinished_orders = 0
+        self.diag_blocked_replenishment_no_robot_total = 0
+        self.diag_blocked_replenishment_pod_not_idle_total = 0
+        self.diag_blocked_replenishment_no_station_total = 0
+        self.diag_replenishment_trips_since_last_fulfillment_rise = 0
+        self.diag_last_fulfillment_rise_tick = 0
+        self._diag_prev_orders_fulfilled = 0
+        self._diag_prev_replenishment_trips = 0
     
     def _increase_nested_quantity(self, store: Dict, order_id, sku, qty):
         if order_id is None or sku is None or qty <= 0:
@@ -557,6 +568,7 @@ class Warehouse:
         self.total_energy = total_energy
         self.total_fixed_load_energy = total_fixed_load_energy
         self.total_turning = total_turning
+        self.updateCheckpointDiagnosticCounters()
         # /Ngitung energy + replenishment
 
         if int(self._tick) == self.next_process_tick:
@@ -876,6 +888,28 @@ class Warehouse:
 
         if progress_happened:
             self.health_last_progress_tick = current_tick
+
+    def updateCheckpointDiagnosticCounters(self):
+        if not self.diagnostic_checkpoints_enabled:
+            return
+
+        current_tick = int(self._tick)
+        current_fulfilled_orders = int(self.orders_fulfilled)
+        if current_fulfilled_orders > self._diag_prev_orders_fulfilled:
+            self.diag_last_fulfillment_rise_tick = current_tick
+            self.diag_replenishment_trips_since_last_fulfillment_rise = 0
+            self._diag_prev_orders_fulfilled = current_fulfilled_orders
+            self._diag_prev_replenishment_trips = int(self.replenishment_trips)
+            return
+
+        self._diag_prev_orders_fulfilled = current_fulfilled_orders
+
+        current_replenishment_trips = int(self.replenishment_trips)
+        if current_replenishment_trips > self._diag_prev_replenishment_trips:
+            self.diag_replenishment_trips_since_last_fulfillment_rise += (
+                current_replenishment_trips - self._diag_prev_replenishment_trips
+            )
+        self._diag_prev_replenishment_trips = current_replenishment_trips
 
     def countHealthConsistencyViolations(self):
         violations = 0
@@ -1390,6 +1424,8 @@ class Warehouse:
 
             station = self.station_manager.findAvailableReplenishmentStation()
             if station is None:
+                if self.diagnostic_checkpoints_enabled:
+                    self.diag_blocked_replenishment_no_station_total += 1
                 self.markBlockedReplenishmentRequest(request, current_tick=current_tick)
                 break
 
@@ -1406,6 +1442,8 @@ class Warehouse:
                 continue
 
             if not pod.is_idle:
+                if self.diagnostic_checkpoints_enabled:
+                    self.diag_blocked_replenishment_pod_not_idle_total += 1
                 self.markBlockedReplenishmentRequest(request, pod=pod, current_tick=current_tick)
                 continue
 
@@ -1419,6 +1457,8 @@ class Warehouse:
 
             robot = self.robot_manager.findNearestAvailableRobot(pod.coordinate)
             if robot is None:
+                if self.diagnostic_checkpoints_enabled:
+                    self.diag_blocked_replenishment_no_robot_total += 1
                 self.markBlockedReplenishmentRequest(request, pod=pod, current_tick=current_tick)
                 break
 
