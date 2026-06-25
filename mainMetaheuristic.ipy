@@ -53,7 +53,7 @@ base_dir = Path(__file__).resolve().parent
 path_U = base_dir / "jaccard_similarity_matrix.csv"
 path_min_inv = base_dir / "minimum_inventory.csv"
 path_max_cap = base_dir / "max_comp_number.csv"
-path_stage1 = base_dir / "Clustering" / "bc-k-means-results.csv"
+path_stage1 = base_dir / "Clustering" / "bc-nearest-neighbor-results.csv"
 
 G_scalar = 40
 print('Reading data files', flush=True)
