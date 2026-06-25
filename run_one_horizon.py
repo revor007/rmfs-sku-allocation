@@ -30,6 +30,7 @@ ORDER_MODE_ENV = "FULL_POSTT_ORDER_MODE"
 BOOTSTRAP_BASE_SEED_ENV = "FULL_POSTT_BOOTSTRAP_BASE_SEED"
 BOOTSTRAP_ARRIVAL_MODE_ENV = "FULL_POSTT_BOOTSTRAP_ARRIVAL_MODE"
 BOOTSTRAP_N_ORDERS_ENV = "FULL_POSTT_BOOTSTRAP_N_ORDERS"
+BOOTSTRAP_TARGET_ORDERS_PER_HOUR_ENV = "FULL_POSTT_BOOTSTRAP_TARGET_ORDERS_PER_HOUR"
 BOOTSTRAP_INCREMENT_EVERY_ENV = "FULL_POSTT_BOOTSTRAP_INCREMENT_EVERY"
 BOOTSTRAP_SHARED_ORDER_PATH_ENV = "FULL_POSTT_SHARED_BOOTSTRAP_ORDER_PATH"
 DIAGNOSTIC_CHECKPOINTS_ENV = "FULL_POSTT_DIAGNOSTIC_CHECKPOINTS"
@@ -186,6 +187,15 @@ bootstrap_n_orders = (
     if bootstrap_n_orders_raw is not None and bootstrap_n_orders_raw.strip() != ""
     else None
 )
+bootstrap_target_orders_per_hour_raw = os.environ.get(
+    BOOTSTRAP_TARGET_ORDERS_PER_HOUR_ENV,
+    "",
+).strip()
+bootstrap_target_orders_per_hour = (
+    float(bootstrap_target_orders_per_hour_raw)
+    if bootstrap_target_orders_per_hour_raw != ""
+    else None
+)
 bootstrap_increment_every_raw = os.environ.get(
     BOOTSTRAP_INCREMENT_EVERY_ENV,
     "",
@@ -229,6 +239,26 @@ if run_count <= 0:
     raise SystemExit("run_count must be a positive integer.")
 if order_mode not in {"fixed_actual", "bootstrap_actual"}:
     raise SystemExit("FULL_POSTT_ORDER_MODE must be either 'fixed_actual' or 'bootstrap_actual'.")
+if bootstrap_arrival_mode not in {
+    "empirical_interarrival",
+    "empirical_gap_scaled",
+    "sample_original_times",
+}:
+    raise SystemExit(
+        "FULL_POSTT_BOOTSTRAP_ARRIVAL_MODE must be one of "
+        "'empirical_interarrival', 'empirical_gap_scaled', or 'sample_original_times'."
+    )
+if (
+    bootstrap_arrival_mode == "empirical_gap_scaled"
+    and (
+        bootstrap_target_orders_per_hour is None
+        or bootstrap_target_orders_per_hour <= 0
+    )
+):
+    raise SystemExit(
+        "FULL_POSTT_BOOTSTRAP_TARGET_ORDERS_PER_HOUR must be a positive number "
+        "when FULL_POSTT_BOOTSTRAP_ARRIVAL_MODE='empirical_gap_scaled'."
+    )
 if bootstrap_increment_every is not None and bootstrap_increment_every <= 0:
     raise SystemExit("FULL_POSTT_BOOTSTRAP_INCREMENT_EVERY must be a positive integer.")
 if pod_location_mode not in {"identity", "shuffle"}:
@@ -260,11 +290,13 @@ def append_result_frame(frame: pd.DataFrame) -> None:
     )
 
 
-def prepare_order_stream(replication_index: int) -> tuple[str, int | None, Path | None]:
+def prepare_order_stream(
+    replication_index: int,
+) -> tuple[str, int | None, str | None, float | None, Path | None]:
     os.environ[ORDER_MODE_ENV] = order_mode
     if order_mode != "bootstrap_actual":
         os.environ.pop(BOOTSTRAP_SHARED_ORDER_PATH_ENV, None)
-        return order_mode, None, None
+        return order_mode, None, None, None, None
 
     if bootstrap_increment_every is not None:
         current_seed = bootstrap_base_seed + (
@@ -277,9 +309,16 @@ def prepare_order_stream(replication_index: int) -> tuple[str, int | None, Path 
         seed=current_seed,
         n_orders=bootstrap_n_orders,
         arrival_mode=bootstrap_arrival_mode,
+        target_orders_per_hour=bootstrap_target_orders_per_hour,
     )
     os.environ[BOOTSTRAP_SHARED_ORDER_PATH_ENV] = str(shared_order_path)
-    return order_mode, current_seed, shared_order_path
+    return (
+        order_mode,
+        current_seed,
+        bootstrap_arrival_mode,
+        bootstrap_target_orders_per_hour,
+        shared_order_path,
+    )
 
 
 def prepare_pod_location_stream(replication_index: int) -> tuple[str, int | None]:
@@ -326,6 +365,8 @@ def build_result_frame(
     replication_index: int,
     active_order_mode: str,
     active_bootstrap_seed: int | None,
+    active_bootstrap_arrival_mode: str | None,
+    active_bootstrap_target_orders_per_hour: float | None,
     active_pod_location_mode: str,
     active_pod_location_seed: int | None,
     elapsed: float,
@@ -360,6 +401,8 @@ def build_result_frame(
         "replications_total": run_count,
         "order_mode": active_order_mode,
         "bootstrap_seed": active_bootstrap_seed,
+        "bootstrap_arrival_mode": active_bootstrap_arrival_mode,
+        "bootstrap_target_orders_per_hour": active_bootstrap_target_orders_per_hour,
         "pod_location_mode": active_pod_location_mode,
         "pod_location_seed": active_pod_location_seed,
         "ticks_elapsed": float(warehouse._tick),
@@ -524,9 +567,13 @@ def build_result_frame(
 
 
 def run_single_replication(replication_index: int) -> pd.DataFrame:
-    active_order_mode, active_bootstrap_seed, shared_order_path = prepare_order_stream(
-        replication_index
-    )
+    (
+        active_order_mode,
+        active_bootstrap_seed,
+        active_bootstrap_arrival_mode,
+        active_bootstrap_target_orders_per_hour,
+        shared_order_path,
+    ) = prepare_order_stream(replication_index)
     active_pod_location_mode, active_pod_location_seed = prepare_pod_location_stream(
         replication_index
     )
@@ -537,6 +584,8 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
         f"run={replication_index}/{run_count} "
         f"order_mode={active_order_mode} "
         f"bootstrap_seed={active_bootstrap_seed if active_bootstrap_seed is not None else 'n/a'} "
+        f"bootstrap_arrival_mode={active_bootstrap_arrival_mode if active_bootstrap_arrival_mode is not None else 'n/a'} "
+        f"bootstrap_target_oph={active_bootstrap_target_orders_per_hour if active_bootstrap_target_orders_per_hour is not None else 'n/a'} "
         f"pod_location_mode={active_pod_location_mode} "
         f"pod_location_seed={active_pod_location_seed if active_pod_location_seed is not None else 'n/a'} "
         f"horizon_tick={horizon_tick:g} "
@@ -586,6 +635,8 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
                 replication_index=replication_index,
                 active_order_mode=active_order_mode,
                 active_bootstrap_seed=active_bootstrap_seed,
+                active_bootstrap_arrival_mode=active_bootstrap_arrival_mode,
+                active_bootstrap_target_orders_per_hour=active_bootstrap_target_orders_per_hour,
                 active_pod_location_mode=active_pod_location_mode,
                 active_pod_location_seed=active_pod_location_seed,
                 elapsed=now - start,
@@ -617,6 +668,8 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
         replication_index=replication_index,
         active_order_mode=active_order_mode,
         active_bootstrap_seed=active_bootstrap_seed,
+        active_bootstrap_arrival_mode=active_bootstrap_arrival_mode,
+        active_bootstrap_target_orders_per_hour=active_bootstrap_target_orders_per_hour,
         active_pod_location_mode=active_pod_location_mode,
         active_pod_location_seed=active_pod_location_seed,
         elapsed=elapsed,
@@ -632,6 +685,8 @@ def run_single_replication(replication_index: int) -> pd.DataFrame:
         f"run={replication_index}/{run_count} "
         f"order_mode={active_order_mode} "
         f"bootstrap_seed={active_bootstrap_seed if active_bootstrap_seed is not None else 'n/a'} "
+        f"bootstrap_arrival_mode={active_bootstrap_arrival_mode if active_bootstrap_arrival_mode is not None else 'n/a'} "
+        f"bootstrap_target_oph={active_bootstrap_target_orders_per_hour if active_bootstrap_target_orders_per_hour is not None else 'n/a'} "
         f"pod_location_mode={active_pod_location_mode} "
         f"pod_location_seed={active_pod_location_seed if active_pod_location_seed is not None else 'n/a'} "
         f"tick={float(warehouse._tick):.2f} "

@@ -9,6 +9,7 @@ import pandas as pd
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SECONDS_PER_HOUR = 3600.0
 
 ACTUAL_ORDER_ID_CANDIDATES = ["订单号", "order_id", "Order ID"]
 ACTUAL_SKU_CANDIDATES = ["商品编码", "item_code", "Item Code"]
@@ -74,6 +75,16 @@ def _shared_cache_dir(run_root: Path) -> Path:
         return run_root.parents[2] / "_shared_bootstrap_orders"
     except IndexError:
         return SCRIPT_DIR / "_shared_bootstrap_orders"
+
+
+def _format_rate_token(target_orders_per_hour: float | None) -> str:
+    if target_orders_per_hour is None:
+        return "default"
+
+    rate = float(target_orders_per_hour)
+    if rate.is_integer():
+        return str(int(rate))
+    return str(rate).replace(".", "p")
 
 
 def find_actual_order_data_path(run_root: Path) -> Path:
@@ -148,6 +159,7 @@ def _bootstrap_arrivals(
     sample_size: int,
     rng: np.random.Generator,
     arrival_mode: str,
+    target_orders_per_hour: float | None = None,
 ) -> np.ndarray:
     if sample_size <= 0:
         return np.asarray([], dtype=np.int64)
@@ -161,13 +173,26 @@ def _bootstrap_arrivals(
         sampled_arrivals = np.sort(sampled_arrivals.astype(np.int64))
         return sampled_arrivals
 
-    if arrival_mode != "empirical_interarrival":
+    if arrival_mode not in {"empirical_interarrival", "empirical_gap_scaled"}:
         raise ValueError(
             f"Unsupported bootstrap arrival mode '{arrival_mode}'. "
-            "Expected 'empirical_interarrival' or 'sample_original_times'."
+            "Expected 'empirical_interarrival', 'empirical_gap_scaled', "
+            "or 'sample_original_times'."
         )
 
-    horizon = int(empirical_arrivals.max())
+    if arrival_mode == "empirical_gap_scaled":
+        if target_orders_per_hour is None or float(target_orders_per_hour) <= 0:
+            raise ValueError(
+                "empirical_gap_scaled requires a positive target_orders_per_hour value."
+            )
+        horizon = int(
+            max(
+                1,
+                round((float(sample_size) * SECONDS_PER_HOUR) / float(target_orders_per_hour)),
+            )
+        )
+    else:
+        horizon = int(empirical_arrivals.max())
     if empirical_arrivals.size == 1 or horizon <= 0:
         return np.zeros(sample_size, dtype=np.int64)
 
@@ -228,16 +253,22 @@ def ensure_shared_bootstrap_order_file(
     seed: int,
     n_orders: int | None = None,
     arrival_mode: str = "empirical_interarrival",
+    target_orders_per_hour: float | None = None,
 ) -> Path:
     run_root = run_root.resolve()
     source_path = find_actual_order_data_path(run_root)
     source_hash = _stable_file_hash(source_path)
     order_count_token = "default" if n_orders is None else str(int(n_orders))
+    arrival_mode_token = arrival_mode
+    if arrival_mode == "empirical_gap_scaled":
+        arrival_mode_token = (
+            f"{arrival_mode}_{_format_rate_token(target_orders_per_hour)}oph"
+        )
 
     cache_dir = _shared_cache_dir(run_root) / source_hash
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_name = (
-        f"{source_path.stem}_bootstrap_seed_{seed}_n_{order_count_token}_{arrival_mode}.csv"
+        f"{source_path.stem}_bootstrap_seed_{seed}_n_{order_count_token}_{arrival_mode_token}.csv"
     )
     cache_path = cache_dir / cache_name
     metadata_path = cache_dir / f"{cache_path.stem}.json"
@@ -263,6 +294,7 @@ def ensure_shared_bootstrap_order_file(
         sample_size=int(resolved_n_orders),
         rng=rng,
         arrival_mode=arrival_mode,
+        target_orders_per_hour=target_orders_per_hour,
     )
     generated_order = _build_generated_orders(
         raw_orders=raw_orders,
@@ -276,6 +308,11 @@ def ensure_shared_bootstrap_order_file(
         "seed": int(seed),
         "n_orders": int(resolved_n_orders),
         "arrival_mode": arrival_mode,
+        "target_orders_per_hour": (
+            float(target_orders_per_hour)
+            if target_orders_per_hour is not None
+            else None
+        ),
         "source_path": str(source_path),
         "source_hash": source_hash,
         "source_unique_orders": source_unique_orders,
