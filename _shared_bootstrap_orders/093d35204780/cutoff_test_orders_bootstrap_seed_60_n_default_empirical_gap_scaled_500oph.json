@@ -1,0 +1,15 @@
+{
+  "generator": "shared_bootstrap_actual",
+  "seed": 60,
+  "n_orders": 14992,
+  "arrival_mode": "empirical_gap_scaled",
+  "target_orders_per_hour": 500.0,
+  "source_path": "D:\\lukman-rmfs\\_full_postt_parallel_runs\\four_scenario_1000_shared_latest\\my_scenario-fallbackrandom\\netlogo-rmfs\\data\\input\\cutoff_test_orders.csv",
+  "source_hash": "093d35204780",
+  "source_unique_orders": 14992,
+  "sampled_unique_source_orders": 9402,
+  "generated_unique_orders": 14992,
+  "generated_order_lines": 39400,
+  "generated_max_arrival": 107942,
+  "output_path": "D:\\lukman-rmfs\\_full_postt_parallel_runs\\_shared_bootstrap_orders\\093d35204780\\cutoff_test_orders_bootstrap_seed_60_n_default_empirical_gap_scaled_500oph.csv"
+}
